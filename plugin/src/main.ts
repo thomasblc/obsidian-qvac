@@ -29,7 +29,7 @@ export default class QvacPlugin extends Plugin {
     this.addRibbonIcon("bot", "QVAC", () => this.activateView("chat"));
     this.addCommand({ id: "open-chat", name: "Open chat", callback: () => this.activateView("chat") });
     this.addCommand({ id: "open-search", name: "Open semantic search", callback: () => this.activateView("search") });
-    this.addCommand({ id: "open-related", name: "Open related notes", callback: () => this.activateView("related") });
+    this.addCommand({ id: "open-connect", name: "Open Connect (find missing links)", callback: () => this.activateView("connect") });
     this.addCommand({ id: "open-train", name: "Train a model on your vault", callback: () => this.activateView("train") });
     this.addCommand({ id: "index-vault", name: "Index vault (incremental)", callback: () => this.indexVault(false) });
     this.addCommand({ id: "reindex-vault", name: "Reindex vault (full)", callback: () => this.indexVault(true) });
@@ -98,6 +98,40 @@ export default class QvacPlugin extends Plugin {
     const ws = await this.ensureWs();
     const r = await ws.rpc("search", { vaultId: this.vaultId, query, topK: 12 }, { timeoutMs: 30000 });
     return r.ok ? (r.data?.hits || []) : [];
+  }
+
+  // ---- connect (find + create the missing [[links]]) ----
+  // Obsidian's resolved-links graph: { sourcePath: { targetPath: count } }. We read it to know what
+  // is ALREADY linked, so the scan never re-proposes an existing edge.
+  existingLinkPairs(): string[][] {
+    const rl = (this.app.metadataCache as any).resolvedLinks || {};
+    const out: string[][] = [];
+    for (const a of Object.keys(rl)) for (const b of Object.keys(rl[a] || {})) out.push([a, b]);
+    return out;
+  }
+  linkedTargetsOf(fromPath: string): string[] {
+    const rl = (this.app.metadataCache as any).resolvedLinks || {};
+    return Object.keys(rl[fromPath] || {});
+  }
+  async connectScan(existingPairs: string[][], onFrame: (f: any) => void) {
+    const ws = await this.ensureWs();
+    return ws.rpc("connect.scan", { vaultId: this.vaultId, existingPairs, minScore: 0.3, maxCandidates: 20 }, { onFrame, timeoutMs: 10 * 60 * 1000 });
+  }
+  // Insert [[to]] into the note `from`, under a "## Related" section (created if missing). Uses
+  // vault.process (atomic read-modify-write) so it never clobbers concurrent edits.
+  async insertLink(fromPath: string, toPath: string): Promise<boolean> {
+    const from = this.app.vault.getFileByPath(fromPath);
+    const to = this.app.vault.getFileByPath(toPath);
+    if (!(from instanceof TFile) || !(to instanceof TFile)) { new Notice("QVAC: note not found"); return false; }
+    const link = `[[${this.app.metadataCache.fileToLinktext(to, fromPath, true)}]]`;
+    await this.app.vault.process(from, (content) => {
+      if (content.includes(link)) return content;
+      const re = /\n## Related[^\n]*\n/;
+      if (re.test(content)) return content.replace(re, (m) => m + `- ${link}\n`);
+      return content + (content.endsWith("\n") ? "" : "\n") + `\n## Related\n- ${link}\n`;
+    });
+    new Notice(`QVAC: linked ${to.basename} -> ${from.basename}`);
+    return true;
   }
   private runInline(editor: Editor, title: string, instruction: string) {
     const sel = editor.getSelection();

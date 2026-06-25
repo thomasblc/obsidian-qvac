@@ -15,14 +15,16 @@ The AI runs in a small **companion** process; the **plugin** is a thin client th
 
 ## Features
 
+One panel, four tabs:
+
 | | |
 |---|---|
 | **Chat** | Ask questions, get answers grounded in your notes with clickable citations. |
-| **Search** | Find notes by meaning, not keywords. |
-| **Related** | A live list of notes related to whatever you are reading. |
-| **Inline commands** | Select text -> summarize / rewrite / fix grammar / expand, with review-before-apply. |
-| **OCR (opt-in)** | The text inside your screenshots and scans becomes searchable. |
+| **AI Search** | Find notes by meaning, not keywords (Obsidian's built-in search is keyword-only). |
+| **Connect** | The differentiator. Finds notes that belong together but are not linked yet, lets an LLM judge which deserve a real link, and **writes the `[[wikilink]]` for you** (per-note while you read, or a whole-vault scan). Turns a pile of notes into a graph. |
 | **Train (optional)** | Fine-tune a small model on your notes so chat answers from memory (lighter on context) and in your voice. Runs on your machine; the plugin is fully usable without it. |
+
+Plus: inline writing commands (summarize / rewrite / fix grammar / expand, with review-before-apply) and opt-in OCR so the text inside your screenshots becomes searchable.
 
 ## Run it (dev)
 

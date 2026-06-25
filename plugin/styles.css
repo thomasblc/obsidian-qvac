@@ -64,6 +64,22 @@
 .qvac-result-score { font-size: 10px; color: var(--text-faint); font-family: var(--font-monospace); }
 .qvac-result-snippet { font-size: 12px; color: var(--text-muted); margin-top: 5px; line-height: 1.45; }
 
+/* connect */
+.qvac-connect { padding: 12px; overflow-y: auto; height: 100%; }
+.qvac-connect-intro { font-size: 12px; color: var(--text-muted); line-height: 1.5; margin-bottom: 12px; }
+.qvac-connect-status { font-size: 11px; color: var(--text-muted); margin: 8px 0; font-family: var(--font-monospace); }
+.qvac-connect-results { display: flex; flex-direction: column; gap: 8px; }
+.qvac-connect-subhead { font-size: 10px; text-transform: uppercase; letter-spacing: 1.5px; color: var(--text-muted); margin: 18px 0 8px; }
+.qvac-connect-related { display: flex; flex-direction: column; gap: 8px; }
+.qvac-result-right { display: flex; align-items: center; gap: 8px; }
+.qvac-linked { font-size: 10px; color: var(--text-faint); }
+.qvac-proposal { padding: 10px 12px; border-radius: 10px; background: var(--background-secondary); border: 1px solid var(--background-modifier-border); }
+.qvac-proposal.qvac-done { opacity: 0.55; border-color: var(--qv); }
+.qvac-proposal-top { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.qvac-proposal-arrow { color: var(--qv); font-weight: 700; }
+.qvac-proposal-reason { font-size: 12px; color: var(--text-muted); margin: 6px 0 8px; line-height: 1.4; font-style: italic; }
+.qvac-proposal-acts { display: flex; gap: 6px; }
+
 /* train */
 .qvac-train { padding: 14px; overflow-y: auto; }
 .qvac-train-title { font-weight: 700; font-size: 14px; color: var(--text-normal); }

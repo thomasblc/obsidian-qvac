@@ -2,10 +2,10 @@ import { ItemView, WorkspaceLeaf, MarkdownRenderer, Notice, TFile, debounce, set
 import type QvacPlugin from "./main";
 
 export const VIEW_TYPE_QVAC = "qvac-view";
-export type QvacTab = "chat" | "search" | "related" | "train";
+export type QvacTab = "chat" | "search" | "connect" | "train";
 
-// One unified, QVAC-branded panel with four tabs. Surfaces every feature in one place
-// (the old separate hidden views are gone): Chat, Semantic search, Related notes, Train.
+// One unified, QVAC-branded panel with four tabs. Surfaces every feature in one place:
+// Chat, AI Search (semantic), Connect (related notes + create the missing [[links]]), Train.
 export class QvacView extends ItemView {
   private tab: QvacTab = "chat";
   private tabsEl: HTMLElement;
@@ -41,8 +41,8 @@ export class QvacView extends ItemView {
     this.tabsEl = root.createDiv({ cls: "qvac-tabs" });
     const tabs: { id: QvacTab; label: string; icon: string }[] = [
       { id: "chat", label: "Chat", icon: "message-square" },
-      { id: "search", label: "Search", icon: "search" },
-      { id: "related", label: "Related", icon: "link" },
+      { id: "search", label: "AI Search", icon: "search" },
+      { id: "connect", label: "Connect", icon: "git-fork" },
       { id: "train", label: "Train", icon: "graduation-cap" },
     ];
     for (const t of tabs) {
@@ -56,8 +56,8 @@ export class QvacView extends ItemView {
     this.bodyEl = root.createDiv({ cls: "qvac-body" });
     this.setTab(this.tab);
 
-    // refresh related on note switch (debounced; file-open fires twice)
-    this.registerEvent(this.app.workspace.on("file-open", debounce(() => { if (this.tab === "related") this.renderRelated(); }, 400, true)));
+    // refresh Connect's per-note section on note switch (debounced; file-open fires twice)
+    this.registerEvent(this.app.workspace.on("file-open", debounce(() => { if (this.tab === "connect") this.renderConnect(); }, 400, true)));
   }
   async onClose() { /* */ }
 
@@ -75,7 +75,7 @@ export class QvacView extends ItemView {
     this.bodyEl.empty();
     if (tab === "chat") this.renderChat();
     else if (tab === "search") this.renderSearch();
-    else if (tab === "related") this.renderRelated();
+    else if (tab === "connect") this.renderConnect();
     else if (tab === "train") this.renderTrain();
   }
 
@@ -178,26 +178,74 @@ export class QvacView extends ItemView {
     setTimeout(() => inp.focus(), 0);
   }
 
-  // ---------- RELATED ----------
-  private async renderRelated() {
-    const wrap = this.bodyEl.createDiv({ cls: "qvac-related" });
+  // ---------- CONNECT (related notes + create the missing [[links]]) ----------
+  private async renderConnect() {
+    const wrap = this.bodyEl.createDiv({ cls: "qvac-connect" });
+    wrap.createDiv({ cls: "qvac-connect-intro", text: "Obsidian only knows the [[links]] you type. Connect finds notes that belong together but are not linked yet, and writes the link for you." });
+
+    // vault-wide scan
+    const scanBtn = wrap.createEl("button", { cls: "qvac-btn-primary", text: "Scan vault for missing links" });
+    const scanStatus = wrap.createDiv({ cls: "qvac-connect-status" });
+    const scanResults = wrap.createDiv({ cls: "qvac-connect-results" });
+    scanBtn.onclick = async () => {
+      scanBtn.disabled = true; scanStatus.setText("Scanning…"); scanResults.empty();
+      try {
+        const res = await this.plugin.connectScan(this.plugin.existingLinkPairs(), (f: any) => {
+          if (f.type === "connect.progress") scanStatus.setText(`Judging ${f.done}/${f.total} candidates…`);
+        });
+        const cands = (res.ok && res.data?.candidates) || [];
+        scanStatus.setText(cands.length ? `${cands.length} link(s) proposed` : `No missing links found (${res.data?.notes ?? 0} notes).`);
+        for (const c of cands) this.renderProposal(scanResults, c);
+      } catch (e: any) { scanStatus.setText("Scan failed: " + (e?.message || e)); }
+      finally { scanBtn.disabled = false; }
+    };
+
+    // per-note: related to the active note, each one-click linkable
     const file = this.app.workspace.getActiveFile();
-    if (!file || file.extension !== "md") { wrap.createDiv({ cls: "qvac-empty", text: "Open a note to see related notes." }); return; }
-    wrap.createDiv({ cls: "qvac-related-for", text: "Related to: " + file.basename });
-    const list = wrap.createDiv({ cls: "qvac-related-list" });
-    list.setText("Finding related…");
-    try {
-      const text = await this.app.vault.cachedRead(file);
-      const hits = await this.plugin.related(text, file.path);
-      list.empty();
-      if (!hits.length) { list.createDiv({ cls: "qvac-empty", text: "No related notes found." }); return; }
-      for (const h of hits) {
-        const card = list.createDiv({ cls: "qvac-result" });
-        const a = card.createEl("a", { cls: "qvac-result-title", text: h.source.replace(/\.md$/, ""), href: "#" });
-        a.onclick = (e) => { e.preventDefault(); this.plugin.openSource(h.source); };
-        card.createSpan({ cls: "qvac-result-score", text: Math.round((h.score || 0) * 100) + "%" });
-      }
-    } catch (e: any) { list.empty(); list.setText("Related unavailable: " + (e?.message || e)); }
+    if (file && file.extension === "md") {
+      wrap.createDiv({ cls: "qvac-connect-subhead", text: "Related to " + file.basename });
+      const list = wrap.createDiv({ cls: "qvac-connect-related" });
+      list.setText("Finding related…");
+      try {
+        const text = await this.app.vault.cachedRead(file);
+        const hits = await this.plugin.related(text, file.path);
+        const linked = new Set(this.plugin.linkedTargetsOf(file.path));
+        list.empty();
+        if (!hits.length) { list.createDiv({ cls: "qvac-empty", text: "No related notes." }); return; }
+        for (const h of hits) this.renderRelatedRow(list, file.path, h, linked.has(h.source));
+      } catch (e: any) { list.empty(); list.setText("Unavailable: " + (e?.message || e)); }
+    } else {
+      wrap.createDiv({ cls: "qvac-empty", text: "Open a note to see + link related notes." });
+    }
+  }
+  // a vault-scan proposal: A <-> B + reason; "Link" inserts [[B]] into A.
+  private renderProposal(container: HTMLElement, c: any) {
+    const card = container.createDiv({ cls: "qvac-proposal" });
+    const top = card.createDiv({ cls: "qvac-proposal-top" });
+    const a = top.createEl("a", { cls: "qvac-result-title", text: c.a.replace(/\.md$/, ""), href: "#" });
+    a.onclick = (e) => { e.preventDefault(); this.plugin.openSource(c.a); };
+    top.createSpan({ cls: "qvac-proposal-arrow", text: "↔" });
+    const b = top.createEl("a", { cls: "qvac-result-title", text: c.b.replace(/\.md$/, ""), href: "#" });
+    b.onclick = (e) => { e.preventDefault(); this.plugin.openSource(c.b); };
+    card.createDiv({ cls: "qvac-proposal-reason", text: c.reason });
+    const acts = card.createDiv({ cls: "qvac-proposal-acts" });
+    const linkBtn = acts.createEl("button", { cls: "qvac-pill on", text: "Link" });
+    linkBtn.onclick = async () => { if (await this.plugin.insertLink(c.a, c.b)) { card.addClass("qvac-done"); linkBtn.setText("✓ Linked"); linkBtn.disabled = true; } };
+    acts.createEl("button", { cls: "qvac-pill", text: "Skip" }).onclick = () => card.remove();
+  }
+  // a related-note row for the active note: open, score, and "+ Link" (or "✓ linked").
+  private renderRelatedRow(container: HTMLElement, fromPath: string, h: any, linked: boolean) {
+    const card = container.createDiv({ cls: "qvac-result" });
+    const top = card.createDiv({ cls: "qvac-result-top" });
+    const a = top.createEl("a", { cls: "qvac-result-title", text: h.source.replace(/\.md$/, ""), href: "#" });
+    a.onclick = (e) => { e.preventDefault(); this.plugin.openSource(h.source); };
+    const right = top.createDiv({ cls: "qvac-result-right" });
+    right.createSpan({ cls: "qvac-result-score", text: Math.round((h.score || 0) * 100) + "%" });
+    if (linked) right.createSpan({ cls: "qvac-linked", text: "✓ linked" });
+    else {
+      const lb = right.createEl("button", { cls: "qvac-pill", text: "+ Link" });
+      lb.onclick = async () => { if (await this.plugin.insertLink(fromPath, h.source)) { lb.setText("✓ linked"); lb.disabled = true; } };
+    }
   }
 
   // ---------- TRAIN ----------
