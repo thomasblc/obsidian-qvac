@@ -3,6 +3,7 @@ import { WsClient } from "./lib/ws";
 import { readDaemonInfo, wsUrl, DaemonInfo } from "./lib/daemon";
 import { vaultId as computeVaultId } from "./lib/vaultid";
 import { diffManifest } from "./lib/diff";
+import { insertRelatedSection } from "./lib/links";
 import { QvacSettings, DEFAULT_SETTINGS, migrateSettings, QvacSettingTab } from "./settings";
 import { QvacView, VIEW_TYPE_QVAC, QvacTab } from "./qvac-view";
 import { ReviewModal } from "./review-modal";
@@ -118,18 +119,17 @@ export default class QvacPlugin extends Plugin {
     return ws.rpc("connect.scan", { vaultId: this.vaultId, existingPairs, minScore: 0.3, maxCandidates: 20 }, { onFrame, timeoutMs: 10 * 60 * 1000 });
   }
   // Insert [[to]] into the note `from`, under a "## Related" section (created if missing). Uses
-  // vault.process (atomic read-modify-write) so it never clobbers concurrent edits.
+  // vault.process (atomic read-modify-write). Hardened (review-pass): identity dedup via the
+  // resolved-links graph (not substring, so an aliased [[Foo|x]] is not duplicated); the heading
+  // match is anchored to a real "## Related" LINE (not a prefix like "## Relatedness") and skips
+  // any "## Related" that sits inside a fenced code block, so it never corrupts a note's content.
   async insertLink(fromPath: string, toPath: string): Promise<boolean> {
     const from = this.app.vault.getFileByPath(fromPath);
     const to = this.app.vault.getFileByPath(toPath);
     if (!(from instanceof TFile) || !(to instanceof TFile)) { new Notice("QVAC: note not found"); return false; }
+    if (this.linkedTargetsOf(fromPath).includes(toPath)) return true; // already linked (by identity)
     const link = `[[${this.app.metadataCache.fileToLinktext(to, fromPath, true)}]]`;
-    await this.app.vault.process(from, (content) => {
-      if (content.includes(link)) return content;
-      const re = /\n## Related[^\n]*\n/;
-      if (re.test(content)) return content.replace(re, (m) => m + `- ${link}\n`);
-      return content + (content.endsWith("\n") ? "" : "\n") + `\n## Related\n- ${link}\n`;
-    });
+    await this.app.vault.process(from, (content) => insertRelatedSection(content, link));
     new Notice(`QVAC: linked ${to.basename} -> ${from.basename}`);
     return true;
   }
