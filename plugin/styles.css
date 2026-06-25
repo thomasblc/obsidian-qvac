@@ -1,0 +1,94 @@
+/* QVAC for Obsidian - unified panel. Brand accent: teal #16e3c1. */
+.qvac { --qv: #16e3c1; --qv-dim: #16e3c133; display: flex; flex-direction: column; height: 100%; padding: 0; }
+
+/* header */
+.qvac-head { display: flex; align-items: center; justify-content: space-between; padding: 12px 14px 8px; }
+.qvac-brand { display: flex; align-items: baseline; gap: 7px; }
+.qvac-logo { font-weight: 800; letter-spacing: 2px; font-size: 15px; color: var(--qv); }
+.qvac-tagline { font-size: 10px; text-transform: uppercase; letter-spacing: 1.5px; color: var(--text-faint); }
+.qvac-conn { display: flex; align-items: center; gap: 6px; }
+.qvac-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text-faint); box-shadow: 0 0 0 0 transparent; }
+.qvac-dot.on { background: var(--qv); box-shadow: 0 0 8px var(--qv); }
+.qvac-dot.off { background: #e0533d; }
+.qvac-conn-text { font-size: 10px; color: var(--text-muted); }
+
+/* tabs */
+.qvac-tabs { display: flex; gap: 2px; padding: 0 10px; border-bottom: 1px solid var(--background-modifier-border); }
+.qvac-tab { display: flex; align-items: center; gap: 5px; padding: 7px 11px; font-size: 12px; color: var(--text-muted); cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px; user-select: none; }
+.qvac-tab:hover { color: var(--text-normal); }
+.qvac-tab.active { color: var(--text-normal); border-bottom-color: var(--qv); }
+.qvac-tab-ic { display: inline-flex; }
+.qvac-tab-ic svg { width: 14px; height: 14px; }
+.qvac-body { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+
+/* shared */
+.qvac-empty { font-size: 12px; color: var(--text-muted); padding: 14px; text-align: center; }
+
+/* chat */
+.qvac-chat { display: flex; flex-direction: column; height: 100%; }
+.qvac-chat-toolbar { display: flex; gap: 6px; padding: 8px 12px 4px; }
+.qvac-pill { font-size: 11px; padding: 3px 10px; border-radius: 999px; background: var(--background-secondary); color: var(--text-muted); border: 1px solid var(--background-modifier-border); cursor: pointer; }
+.qvac-pill.on { background: var(--qv-dim); color: var(--qv); border-color: var(--qv); }
+.qvac-messages { flex: 1; overflow-y: auto; padding: 8px 12px; display: flex; flex-direction: column; gap: 14px; }
+.qvac-msg { display: flex; flex-direction: column; gap: 4px; }
+.qvac-msg-role { font-size: 9px; text-transform: uppercase; letter-spacing: 1.5px; color: var(--text-faint); }
+.qvac-msg-user .qvac-msg-role { color: var(--qv); }
+.qvac-msg-body { font-size: 14px; line-height: 1.55; color: var(--text-normal); }
+.qvac-msg-user .qvac-msg-body { background: var(--background-secondary); padding: 8px 11px; border-radius: 10px; border: 1px solid var(--background-modifier-border); }
+.qvac-msg-body p:first-child { margin-top: 0; } .qvac-msg-body p:last-child { margin-bottom: 0; }
+.qvac-typing { color: var(--text-faint); }
+.qvac-msg-model { font-size: 10px; color: var(--qv); opacity: 0.8; font-style: italic; }
+.qvac-cites { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 2px; }
+.qvac-cite { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; padding: 2px 9px; border-radius: 999px; background: var(--qv-dim); color: var(--qv); border: 1px solid var(--qv); cursor: pointer; text-decoration: none; }
+.qvac-cite:hover { background: var(--qv); color: #04140f; }
+.qvac-cite-ic svg { width: 11px; height: 11px; }
+.qvac-input { display: flex; gap: 8px; align-items: flex-end; padding: 10px 12px 12px; border-top: 1px solid var(--background-modifier-border); }
+.qvac-input textarea { flex: 1; resize: none; border-radius: 10px; padding: 9px 11px; font-size: 13px; line-height: 1.4; background: var(--background-secondary); border: 1px solid var(--background-modifier-border); color: var(--text-normal); max-height: 140px; }
+.qvac-input textarea:focus { border-color: var(--qv); outline: none; box-shadow: 0 0 0 2px var(--qv-dim); }
+.qvac-send { width: 34px; height: 34px; flex: 0 0 34px; border-radius: 50%; background: var(--qv); color: #04140f; border: none; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; }
+.qvac-send:hover { filter: brightness(1.08); }
+.qvac-send svg { width: 16px; height: 16px; }
+
+/* search + related result cards */
+.qvac-search, .qvac-related { display: flex; flex-direction: column; height: 100%; overflow: hidden; }
+.qvac-search-row { padding: 12px; }
+.qvac-search-row input { width: 100%; padding: 9px 12px; border-radius: 10px; background: var(--background-secondary); border: 1px solid var(--background-modifier-border); color: var(--text-normal); font-size: 13px; }
+.qvac-search-row input:focus { border-color: var(--qv); outline: none; box-shadow: 0 0 0 2px var(--qv-dim); }
+.qvac-search-results, .qvac-related-list { flex: 1; overflow-y: auto; padding: 0 12px 12px; display: flex; flex-direction: column; gap: 8px; }
+.qvac-related-for { font-size: 11px; color: var(--text-muted); padding: 12px 12px 6px; }
+.qvac-result { padding: 10px 12px; border-radius: 10px; background: var(--background-secondary); border: 1px solid var(--background-modifier-border); }
+.qvac-result:hover { border-color: var(--qv); }
+.qvac-result-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.qvac-result-title { font-size: 13px; font-weight: 600; color: var(--qv); text-decoration: none; cursor: pointer; }
+.qvac-result-title:hover { text-decoration: underline; }
+.qvac-result-score { font-size: 10px; color: var(--text-faint); font-family: var(--font-monospace); }
+.qvac-result-snippet { font-size: 12px; color: var(--text-muted); margin-top: 5px; line-height: 1.45; }
+
+/* train */
+.qvac-train { padding: 14px; overflow-y: auto; }
+.qvac-train-title { font-weight: 700; font-size: 14px; color: var(--text-normal); }
+.qvac-train-desc { font-size: 12px; color: var(--text-muted); margin: 7px 0 12px; line-height: 1.5; }
+.qvac-btn-primary { width: 100%; padding: 9px; border-radius: 10px; background: var(--qv); color: #04140f; font-weight: 600; border: none; cursor: pointer; font-size: 13px; }
+.qvac-btn-primary:hover { filter: brightness(1.08); }
+.qvac-btn-primary:disabled { opacity: 0.5; cursor: default; }
+.qvac-train-status { font-size: 12px; margin-top: 10px; color: var(--text-normal); }
+.qvac-bar { height: 6px; border-radius: 999px; background: var(--background-modifier-border); margin-top: 8px; overflow: hidden; }
+.qvac-bar.hidden { display: none; }
+.qvac-bar-fill { height: 100%; width: 0%; background: var(--qv); border-radius: 999px; transition: width 0.3s ease; }
+.qvac-train-sub { font-size: 11px; color: var(--text-faint); margin-top: 5px; font-family: var(--font-monospace); }
+.qvac-train-subhead { font-size: 10px; text-transform: uppercase; letter-spacing: 1.5px; color: var(--text-muted); margin: 18px 0 8px; }
+.qvac-adapters { display: flex; flex-direction: column; gap: 7px; }
+.qvac-adapter { padding: 9px 11px; border-radius: 10px; background: var(--background-secondary); border: 1px solid var(--background-modifier-border); display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.qvac-adapter.active { border-color: var(--qv); }
+.qvac-adapter-name { font-size: 12px; }
+.qvac-adapter-acts { display: flex; gap: 5px; }
+.qvac-adapter-acts button { font-size: 11px; padding: 3px 9px; }
+
+/* review modal (inline writing commands) */
+.qvac-review-block { margin: 10px 0; }
+.qvac-review-label { font-size: 10px; text-transform: uppercase; letter-spacing: 1.5px; color: var(--text-faint); margin-bottom: 4px; }
+.qvac-review-text { font-size: 13px; line-height: 1.5; white-space: pre-wrap; padding: 10px; border-radius: 8px; background: var(--background-secondary); border: 1px solid var(--background-modifier-border); max-height: 240px; overflow-y: auto; }
+.qvac-review-btns { display: flex; gap: 8px; justify-content: flex-end; margin-top: 14px; }
+
+/* settings */
+.qvac-status { font-size: 12px; color: var(--text-muted); padding: 4px 0; }

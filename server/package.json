@@ -1,0 +1,16 @@
+{
+  "name": "qvac-obsidian-companion",
+  "version": "0.0.1",
+  "private": true,
+  "description": "QVAC for Obsidian companion daemon: local chat + RAG + (later) OCR/transcribe/LoRA over an Obsidian vault. Nothing leaves the machine.",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "@qvac/sdk": "^0.12.1",
+    "pdfjs-dist": "^4.10.38",
+    "ws": "^8.18.0",
+    "zod": "^4.4.0"
+  }
+}

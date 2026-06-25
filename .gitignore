@@ -1,0 +1,6 @@
+node_modules/
+plugin/main.js
+plugin/main.js.map
+*.log
+.DS_Store
+.qvac*/

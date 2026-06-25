@@ -1,0 +1,19 @@
+{
+  "name": "qvac-local-ai",
+  "version": "0.0.1",
+  "private": true,
+  "description": "QVAC for Obsidian - local AI plugin",
+  "type": "module",
+  "scripts": {
+    "dev": "node esbuild.config.mjs",
+    "build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
+    "test": "node --test --experimental-strip-types test/*.test.ts",
+    "version": "node version-bump.mjs && git add manifest.json versions.json"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "esbuild": "^0.21.5",
+    "obsidian": "^1.5.7",
+    "typescript": "^5.4.5"
+  }
+}
