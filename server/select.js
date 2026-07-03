@@ -130,7 +130,10 @@ export function buildCausalDataset(vault, selectedPaths, outDir, { evalFraction 
   // impossible, so train on everything and validate on the same set (never strand the
   // only doc in eval, which left train empty and falsely failed the "too little text" check).
   const train = [], evalDocs = [];
-  if (docs.length <= 2) {
+  if (docs.length <= 2 || evalFraction <= 0) {
+    // evalFraction 0 = "all docs in train" (the caller carves its own validation split). The old
+    // `Math.round(1/0)=Infinity` made `i % Infinity === 0` true only for i=0, silently stranding
+    // doc[0] in eval - a third of the data for a 3-note vault. Put everything in train.
     train.push(...docs);
   } else {
     const everyN = Math.max(3, Math.round(1 / evalFraction));

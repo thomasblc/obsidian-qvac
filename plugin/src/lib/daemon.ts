@@ -19,14 +19,10 @@ export function readDaemonInfo(): DaemonInfo | null {
   return null;
 }
 
-export async function healthOk(info: DaemonInfo): Promise<any | null> {
-  try {
-    const r = await fetch(`http://127.0.0.1:${info.port}/health?t=${encodeURIComponent(info.token)}`);
-    if (r.ok) return await r.json();
-  } catch { /* */ }
-  return null;
-}
-
+// NOTE: no HTTP `fetch()` health check here on purpose. The Obsidian renderer CORS-blocks a plain
+// fetch to a localhost server (origin app://obsidian.md), so liveness + all RPC go over WebSocket
+// (see main.ts checkHealth -> ws.rpc("health")). A raw fetch() here is both dead and a red flag
+// for community-plugin review, so it is intentionally omitted.
 export function wsUrl(info: DaemonInfo): string {
   return `ws://127.0.0.1:${info.port}?t=${encodeURIComponent(info.token)}`;
 }

@@ -9,8 +9,10 @@ export function insertRelatedSection(content: string, link: string): string {
   const lines = content.split("\n");
   let inFence = false, headingLine = -1;
   for (let i = 0; i < lines.length; i++) {
-    if (/^\s*(```|~~~)/.test(lines[i])) { inFence = !inFence; continue; }
-    if (!inFence && /^## Related[ \t]*$/.test(lines[i])) { headingLine = i; break; }
+    // tolerate a trailing \r (CRLF files) so a Windows note doesn't get a duplicate "## Related"
+    const line = lines[i].replace(/\r$/, "");
+    if (/^\s*(```|~~~)/.test(line)) { inFence = !inFence; continue; }
+    if (!inFence && /^## Related[ \t]*$/.test(line)) { headingLine = i; break; }
   }
   if (headingLine >= 0) { lines.splice(headingLine + 1, 0, `- ${link}`); return lines.join("\n"); }
   return content + (content.endsWith("\n") ? "" : "\n") + `\n## Related\n- ${link}\n`;

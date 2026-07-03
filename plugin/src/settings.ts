@@ -1,4 +1,4 @@
-import { App, PluginSettingTab, Setting } from "obsidian";
+import { App, PluginSettingTab, Setting, DropdownComponent } from "obsidian";
 import type QvacPlugin from "./main";
 
 export interface QvacSettings {
@@ -9,16 +9,26 @@ export interface QvacSettings {
   voiceEnabled: boolean;  // reply in the trained voice (LoRA)
   voiceAdapter: string | null; // active adapter file
   ocrImages: boolean;     // also index the text inside images (OCR), opt-in
+  provisioned: boolean;   // the models have been downloaded (gates auto-index + the Setup panel)
 }
 
+// Chat model choices exposed in the picker, with rough resident RAM so users pick for their machine.
+export const CHAT_MODELS: { key: string; label: string }[] = [
+  { key: "600m", label: "Qwen3 0.6B - fastest, ~1 GB RAM" },
+  { key: "1.7b", label: "Qwen3 1.7B - small, ~2 GB RAM" },
+  { key: "4b", label: "Qwen3 4B - balanced (default), ~4 GB RAM" },
+  { key: "8b", label: "Qwen3 8B - best quality, ~7 GB RAM" },
+];
+
 export const DEFAULT_SETTINGS: QvacSettings = {
-  settingsVersion: 1,
+  settingsVersion: 2,
   indexOnStartup: true,
   chatBaseKey: "4b",
   excludeFolders: "",
   voiceEnabled: false,
   voiceAdapter: null,
   ocrImages: false,
+  provisioned: false,
 };
 
 // Additive merge + version stamp. A renamed/removed key in a future version gets a migration step here.
@@ -48,6 +58,14 @@ export class QvacSettingTab extends PluginSettingTab {
     };
     statusSetting.addButton((b) => b.setButtonText("Recheck").onClick(refresh));
     refresh();
+
+    new Setting(containerEl)
+      .setName("Chat model")
+      .setDesc("The local model used for chat and writing commands. Bigger = better answers, more RAM, slower. Switch takes effect on the next message.")
+      .addDropdown((d: DropdownComponent) => {
+        for (const m of CHAT_MODELS) d.addOption(m.key, m.label);
+        d.setValue(this.plugin.settings.chatBaseKey || "4b").onChange(async (v) => { this.plugin.settings.chatBaseKey = v; await this.plugin.saveSettings(); });
+      });
 
     new Setting(containerEl)
       .setName("Index on startup")

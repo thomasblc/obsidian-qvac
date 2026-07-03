@@ -2,7 +2,7 @@ import { Plugin, WorkspaceLeaf, TFile, Notice, Editor, requestUrl } from "obsidi
 import { WsClient } from "./lib/ws";
 import { readDaemonInfo, wsUrl, DaemonInfo } from "./lib/daemon";
 import { vaultId as computeVaultId } from "./lib/vaultid";
-import { diffManifest } from "./lib/diff";
+import { planTextIndex } from "./lib/diff";
 import { insertRelatedSection } from "./lib/links";
 import { QvacSettings, DEFAULT_SETTINGS, migrateSettings, QvacSettingTab } from "./settings";
 import { QvacView, VIEW_TYPE_QVAC, QvacTab } from "./qvac-view";
@@ -45,7 +45,10 @@ export default class QvacPlugin extends Plugin {
 
     this.app.workspace.onLayoutReady(async () => {
       const up = await this.ensureDaemon();
-      if (up && this.settings.indexOnStartup) this.indexVault(false);
+      // Only auto-index once the models are provisioned; otherwise the first embed-doc triggers a
+      // multi-GB download inside a 60s rpc timeout and fails. Un-provisioned users go through the
+      // Setup panel in the view first (which streams download progress).
+      if (up && this.settings.provisioned && this.settings.indexOnStartup) this.indexVault(false);
     });
   }
 
@@ -75,8 +78,17 @@ export default class QvacPlugin extends Plugin {
   async chat(message: string, history: any[], onFrame: (f: any) => void) {
     const ws = await this.ensureWs();
     const voice = this.settings.voiceEnabled && !!this.settings.voiceAdapter;
-    return ws.rpc("chat", { vaultId: this.vaultId, message, history, memory: true, voice, adapter: this.settings.voiceAdapter || null }, { onFrame, timeoutMs: 180000 });
+    return ws.rpc("chat", { vaultId: this.vaultId, message, history, memory: true, voice, adapter: this.settings.voiceAdapter || null, baseKey: this.settings.chatBaseKey }, { onFrame, timeoutMs: 180000 });
   }
+
+  // ---- first-run provisioning: download the models with visible progress (instead of a silent
+  // multi-GB stall inside a timed rpc). Embeddings enable search + Connect in minutes; chat second.
+  async provision(onFrame: (f: any) => void) {
+    const ws = await this.ensureWs();
+    return ws.rpc("provision", {}, { onFrame, timeoutMs: 60 * 60 * 1000 });
+  }
+  isProvisioned(): boolean { return !!this.settings.provisioned; }
+  async markProvisioned() { this.settings.provisioned = true; await this.saveSettings(); }
 
   async openSource(source: string) {
     const f = this.app.vault.getFileByPath(source);
@@ -160,11 +172,14 @@ export default class QvacPlugin extends Plugin {
     return (r.json && r.json.data && r.json.data.text) || "";
   }
   // ---- incremental indexing ----
+  private excluded(p: string): boolean {
+    const ex = this.settings.excludeFolders.split(",").map((s) => s.trim()).filter(Boolean);
+    return ex.some((e) => p === e || p.startsWith(e + "/"));
+  }
   private localManifest(): Record<string, number> {
-    const exclude = this.settings.excludeFolders.split(",").map((s) => s.trim()).filter(Boolean);
     const out: Record<string, number> = {};
     for (const f of this.app.vault.getMarkdownFiles()) {
-      if (exclude.some((e) => f.path === e || f.path.startsWith(e + "/"))) continue;
+      if (this.excluded(f.path)) continue;
       out[f.path] = f.stat.mtime;
     }
     return out;
@@ -178,8 +193,13 @@ export default class QvacPlugin extends Plugin {
     const notice = new Notice("QVAC: indexing…", 0);
     try {
       const local = this.localManifest();
-      const remote = full ? {} : ((await ws.rpc("index-manifest", { vaultId: this.vaultId })).data?.manifest || {});
-      const { toUpsert, toDrop } = diffManifest(local, remote);
+      // Always fetch the remote manifest (even for "full") so deleted notes are dropped. The manifest
+      // includes BOTH markdown and OCR'd images; split by sourceType so images never enter the TEXT
+      // diff - otherwise diffManifest would put every image in `toDrop` (they're not in the md-only
+      // `local`) and the OCR loop would then skip re-embedding them on an mtime match => image search
+      // silently oscillates on/off every other run. (P0)
+      const remoteFull: Record<string, any> = (await ws.rpc("index-manifest", { vaultId: this.vaultId })).data?.manifest || {};
+      const { toUpsert, toDrop, imgRemote } = planTextIndex(local, remoteFull, full);
       let done = 0;
       for (const p of toUpsert) {
         const f = this.app.vault.getFileByPath(p);
@@ -189,14 +209,17 @@ export default class QvacPlugin extends Plugin {
         notice.setMessage(`QVAC: indexing ${++done}/${toUpsert.length}`);
       }
       for (const p of toDrop) await ws.rpc("drop-doc", { vaultId: this.vaultId, path: p });
-      // Multimodal (opt-in): OCR the text inside images into the index, incrementally.
-      let imgDone = 0;
+      // Multimodal (opt-in): OCR the text inside images into the index, incrementally. Managed
+      // SEPARATELY from the markdown diff above (own manifest slice), so it never fights it.
+      let imgDone = 0, imgDropped = 0;
       if (this.settings.ocrImages) {
         const IMG = new Set(["png", "jpg", "jpeg", "webp", "bmp", "gif", "tiff"]);
+        const live = new Set<string>();
         for (const f of this.app.vault.getFiles()) {
-          if (!IMG.has(f.extension.toLowerCase())) continue;
-          const r = remote[f.path];
-          if (r && Math.floor(r.mtime) === Math.floor(f.stat.mtime)) continue;
+          if (!IMG.has(f.extension.toLowerCase()) || this.excluded(f.path)) continue; // respect exclude (#16)
+          live.add(f.path);
+          const r = imgRemote[f.path];
+          if (!full && r && Math.floor(r.mtime) === Math.floor(f.stat.mtime)) continue; // unchanged
           try {
             const bytes = await this.app.vault.readBinary(f);
             const text = await this.ocrImage(bytes, f.extension);
@@ -204,8 +227,10 @@ export default class QvacPlugin extends Plugin {
             notice.setMessage(`QVAC: OCR ${imgDone} image(s)…`);
           } catch { /* skip unreadable image */ }
         }
+        // drop OCR entries for images deleted from the vault (or now excluded)
+        for (const p of Object.keys(imgRemote)) if (!live.has(p)) { await ws.rpc("drop-doc", { vaultId: this.vaultId, path: p }); imgDropped++; }
       }
-      notice.setMessage(`QVAC: indexed ${toUpsert.length} changed, ${toDrop.length} removed${imgDone ? `, ${imgDone} image(s)` : ""}`);
+      notice.setMessage(`QVAC: indexed ${toUpsert.length} changed, ${toDrop.length + imgDropped} removed${imgDone ? `, ${imgDone} image(s)` : ""}`);
       setTimeout(() => notice.hide(), 4000);
     } catch (e: any) {
       notice.setMessage("QVAC: index failed - " + (e?.message || e));

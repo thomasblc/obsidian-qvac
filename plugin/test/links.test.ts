@@ -33,3 +33,10 @@ test("exact link already present -> unchanged", () => {
 test("plain note -> appends a new section", () => {
   assert.equal(insertRelatedSection("# Note\nbody", "[[Foo]]"), "# Note\nbody\n\n## Related\n- [[Foo]]\n");
 });
+
+test("Wave-0 #13: a CRLF '## Related\\r' heading is matched (no duplicate section)", () => {
+  const crlf = "# Note\r\n## Related\r\n- [[Bar]]\r\n";
+  const r = insertRelatedSection(crlf, "[[Foo]]");
+  assert.equal((r.match(/## Related/g) || []).length, 1, "CRLF heading reused, not duplicated");
+  assert.ok(r.includes("- [[Foo]]"));
+});

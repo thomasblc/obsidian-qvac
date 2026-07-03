@@ -48,6 +48,7 @@
 .qvac-send { width: 34px; height: 34px; flex: 0 0 34px; border-radius: 50%; background: var(--qv); color: #04140f; border: none; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; }
 .qvac-send:hover { filter: brightness(1.08); }
 .qvac-send svg { width: 16px; height: 16px; }
+.qvac-send.stop { background: var(--text-error, #e3556b); color: #fff; }
 
 /* search + related result cards */
 .qvac-search, .qvac-related { display: flex; flex-direction: column; height: 100%; overflow: hidden; }

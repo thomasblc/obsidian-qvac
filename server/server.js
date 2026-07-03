@@ -5,6 +5,7 @@
 // Phase 0a = chat + search over a whole-vault folder index; incremental upsert/OCR land in 0b.
 import http from "node:http";
 import path from "node:path";
+import crypto from "node:crypto";
 import { unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -15,7 +16,7 @@ import { ContextIndex } from "./context.js";
 import { Trainer } from "./train.js";
 import { Vault } from "./vault.js";
 import { buildRecords, buildCausalDataset } from "./select.js";
-import { CONFIG_DIR, vaultDir, ensureToken, writeDaemonFile, removeDaemonFile } from "./config.js";
+import { CONFIG_DIR, vaultDir, ensureToken, writeDaemonFile, removeDaemonFile, safeVaultId } from "./config.js";
 
 const VERSION = "0.0.1-0a";
 const PORT = Number(process.env.PORT || 8849);
@@ -216,19 +217,22 @@ const handlers = {
   async "train.start"(msg, push) {
     if (training) throw new Error("a training run is already active");
     // ctx MUST be a multiple of the 128-token batch (llama.cpp asserts n_ctx_train % n_batch == 0).
-    const { vaultId, vaultPath, baseKey = "1.7b", epochs = 1, ctx = 128 } = msg;
+    const { vaultPath, baseKey = "1.7b", epochs = 1, ctx = 128 } = msg;
+    const vaultId = safeVaultId(msg.vaultId); // client-controlled -> sanitize before ANY path/label use
     if (!vaultPath) throw new Error("train.start requires vaultPath");
     const vault = new Vault(vaultPath);
     const records = buildRecords(vault);
     const prose = records.filter((r) => r.kind === "prose").map((r) => r.path);
     if (prose.length < 2) throw new Error(`need at least 2 substantial prose notes to train (found ${prose.length})`);
-    const outDir = path.join(CONFIG_DIR, "training", "datasets", String(vaultId || "default"));
+    const outDir = path.join(CONFIG_DIR, "training", "datasets", vaultId);
     // evalFraction 0 = all docs in train; finetune carves its own validation split (robust for
     // small vaults, where a separate 10% eval file is too few tokens for the context length).
     const ds = buildCausalDataset(vault, prose, outDir, { evalFraction: 0 });
     push({ type: "train.dataset", proseNotes: prose.length, trainDocs: ds.trainDocs, trainChars: ds.trainChars });
-    training = true;
-    await mm.unloadAll(); // free the worker so the training child can take the ~/.qvac lock
+    training = true;          // gate new dispatch AND stop the idle-exit from killing the run
+    clearTimeout(idleTimer);  // a queued idle-exit must not fire mid-train
+    mm.pause();               // reject any in-flight chat's next load instead of colliding with the lock
+    await mm.unloadAll();     // free the worker so the training child can take the ~/.qvac lock
     try {
       return await new Promise((resolve, reject) => {
         trainer.start({ baseKey, mode: "causal", dataset: `vault-${vaultId}`, trainPath: ds.trainPath, evalPath: null, ctx, epochs }, (ev) => {
@@ -237,7 +241,7 @@ const handlers = {
           else push({ type: `train.${ev.type}`, ...ev });
         });
       });
-    } finally { training = false; }
+    } finally { training = false; mm.resume(); armIdle(); } // resume chat + re-arm idle now that the worker is free
   },
   async "train.list"() { return { adapters: trainer.listAdapters() }; },
   async "train.delete"(msg) {
@@ -245,7 +249,7 @@ const handlers = {
     if (a) { try { unlinkSync(a.abs); } catch { /* */ } }
     return { deleted: msg.file, adapters: trainer.listAdapters() };
   },
-  async "train.stop"() { trainer.stop(); training = false; return { stopped: true }; },
+  async "train.stop"() { trainer.stop(); training = false; mm.resume(); armIdle(); return { stopped: true }; },
 
   async chat(msg, push) {
     const { vaultId, message, memory = true } = msg;
@@ -257,7 +261,8 @@ const handlers = {
       { role: "user", content: String(message || "") },
     ];
     // Voice toggle: load the user's LoRA, FORCING its training base (a mismatch SIGSEGVs llama.cpp).
-    let baseKey = CHAT_BASE, lora = null, model = CHAT_BASE;
+    // Otherwise honor the user's chosen chat model (settings picker), falling back to the default.
+    let baseKey = (msg.baseKey && BASES[msg.baseKey]) ? msg.baseKey : CHAT_BASE, lora = null, model = baseKey;
     if (msg.voice && msg.adapter) {
       const a = trainer.listAdapters().find((x) => x.file === msg.adapter);
       if (a) { baseKey = a.baseKey; lora = a.abs; model = `${a.baseKey}+voice`; }
@@ -275,9 +280,14 @@ const handlers = {
 };
 
 // ---- HTTP (health + non-stream chat) ----
+// Constant-time token check (length-guarded: timingSafeEqual throws on unequal length).
+function tokenEq(t) {
+  if (typeof t !== "string" || t.length !== TOKEN.length) return false;
+  try { return crypto.timingSafeEqual(Buffer.from(t), Buffer.from(TOKEN)); } catch { return false; }
+}
 function tokenOk(req, url) {
   const t = url.searchParams.get("t") || (req.headers.authorization || "").replace(/^Bearer\s+/i, "");
-  return t === TOKEN;
+  return tokenEq(t);
 }
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${HOST}:${PORT}`);
@@ -302,19 +312,27 @@ const server = http.createServer(async (req, res) => {
     send(404, { ok: false, error: "not found" });
   } catch (e) { send(500, { ok: false, error: e?.message || String(e) }); }
 });
+// NOTE: on over-cap we must REJECT, not just req.destroy() - destroy emits 'close'/'aborted', not
+// 'end'/'error', so the old code left the handler promise pending forever (a hung request + leaked
+// buffer per oversized upload). Settle exactly once.
 function readBuffer(req) {
   return new Promise((resolve, reject) => {
-    const chunks = []; let len = 0;
-    req.on("data", (c) => { chunks.push(c); len += c.length; if (len > 30e6) req.destroy(); });
-    req.on("end", () => resolve(Buffer.concat(chunks)));
-    req.on("error", reject);
+    const chunks = []; let len = 0, done = false;
+    const fail = (e) => { if (done) return; done = true; reject(e); try { req.destroy(); } catch { /* */ } };
+    req.on("data", (c) => { if (done) return; chunks.push(c); len += c.length; if (len > 30e6) fail(new Error("payload too large")); });
+    req.on("end", () => { if (done) return; done = true; resolve(Buffer.concat(chunks)); });
+    req.on("aborted", () => fail(new Error("request aborted")));
+    req.on("error", fail);
   });
 }
 function readJson(req) {
   return new Promise((resolve, reject) => {
-    let b = ""; req.on("data", (c) => { b += c; if (b.length > 4e6) req.destroy(); });
-    req.on("end", () => { try { resolve(b ? JSON.parse(b) : {}); } catch (e) { reject(e); } });
-    req.on("error", reject);
+    let b = "", done = false;
+    const fail = (e) => { if (done) return; done = true; reject(e); try { req.destroy(); } catch { /* */ } };
+    req.on("data", (c) => { if (done) return; b += c; if (b.length > 4e6) fail(new Error("payload too large")); });
+    req.on("end", () => { if (done) return; done = true; try { resolve(b ? JSON.parse(b) : {}); } catch (e) { reject(e); } });
+    req.on("aborted", () => fail(new Error("request aborted")));
+    req.on("error", fail);
   });
 }
 
@@ -324,7 +342,7 @@ const wss = new WebSocketServer({
   maxPayload: 16 * 1024 * 1024, // cap WS frame size (the HTTP path caps body; the WS path must too)
   verifyClient: (info, cb) => {
     const url = new URL(info.req.url, `http://${HOST}:${PORT}`);
-    cb(url.searchParams.get("t") === TOKEN, 401, "unauthorized");
+    cb(tokenEq(url.searchParams.get("t")), 401, "unauthorized");
   },
 });
 
@@ -332,7 +350,12 @@ let clients = 0, idleTimer = null;
 function armIdle() {
   if (!IDLE_EXIT_MS) return;
   clearTimeout(idleTimer);
-  if (clients === 0) idleTimer = setTimeout(() => { console.log("[daemon] idle, exiting"); shutdown(0); }, IDLE_EXIT_MS);
+  // Never idle-exit while a LoRA run is active: exiting would orphan the finetune child (keeps
+  // burning GPU) and lose its adapter (the copy-into-adapters/ on the child's close never runs).
+  if (clients === 0 && !training) idleTimer = setTimeout(() => {
+    if (training) { armIdle(); return; } // a run started during the countdown: re-arm, don't kill it
+    console.log("[daemon] idle, exiting"); shutdown(0);
+  }, IDLE_EXIT_MS);
 }
 
 wss.on("connection", (ws) => {

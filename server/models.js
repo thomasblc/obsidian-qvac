@@ -35,7 +35,17 @@ export class ModelManager {
     // unload, download) serializes on it - the WS dispatcher runs handlers concurrently, so without
     // this an embed (memory/context/select) could collide with a chat/load on the one worker.
     this._lock = Promise.resolve();
+    // When a LoRA run takes the ~/.qvac corestore lock, NO worker LOAD may run or it dies with
+    // "File descriptor could not be locked". The WS `training` gate blocks NEW dispatch, but a chat
+    // already in-flight (grounding embed, THEN completion, as two separate lock acquisitions) can
+    // slip a load in between. `paused` closes that gap: set before unloadAll, checked inside every
+    // load path's critical section, so a queued op rejects cleanly instead of colliding.
+    this.paused = false;
   }
+
+  pause() { this.paused = true; }
+  resume() { this.paused = false; }
+  _assertNotPaused() { if (this.paused) throw new Error("QVAC is training a model; chat is paused until it finishes."); }
 
   // chain fn after the current lock holder; the lock advances even if fn rejects
   _serialize(fn) {
@@ -97,6 +107,7 @@ export class ModelManager {
   // second chat/embed can't reload/unload the slot mid-stream.
   async _withLLM(opts = {}, fn = null) {
     return this._serialize(async () => {
+      this._assertNotPaused(); // a training run holds the corestore lock: don't load a model into a collision
       const id = await this._loadLLMUnlocked(opts);
       if (!fn) return id;
       try { return await fn(id); }
@@ -180,6 +191,7 @@ export class ModelManager {
   // Embed many texts; batches to keep each RPC small. Returns number[][] aligned to input.
   async embedMany(texts, { batch = 16, onProgress } = {}) {
     return this._serialize(async () => {
+      this._assertNotPaused(); // training holds the worker lock; a load here would collide
       // Retry once: if the embedder id went stale (the worker restarted out from under us),
       // embed() throws "Model with ID ... not found". Drop the cached slot and reload before failing.
       for (let attempt = 0; attempt < 2; attempt++) {
@@ -221,6 +233,7 @@ export class ModelManager {
   // detector on first use, an extra one-time download). Serialized on the single worker.
   async ocr(imagePath) {
     return this._serialize(async () => {
+      this._assertNotPaused();
       if (!this.ocrId) this.ocrId = await loadModel({ modelSrc: OCR_LATIN_RECOGNIZER_1, modelType: "ocr", modelConfig: { langList: ["en"], useGPU: true } });
       const run = ocr({ modelId: this.ocrId, image: imagePath, options: { paragraph: false } });
       const blocks = await run.blocks;
