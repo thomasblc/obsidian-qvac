@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.1 - 2026-07 - Submission prep
+
+Repo restructured for the Obsidian community directory (plugin at the repo root, companion in
+`companion/`, dev helpers in `dev/`). No behavior change.
+
+- The companion connection status now toggles a CSS class instead of an inline color, so the whole
+  UI is styled from `styles.css` (Obsidian review guideline).
+- The companion is packaged for `npx qvac-obsidian-companion` (public npm), alongside the macOS app.
+
 ## 0.2.0 - 2026-07 - Hardening + onboarding
 
 A correctness + security hardening pass (from a triple-review of the codebase) plus the first

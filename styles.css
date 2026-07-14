@@ -109,3 +109,5 @@
 
 /* settings */
 .qvac-status { font-size: 12px; color: var(--text-muted); padding: 4px 0; }
+.qvac-status.is-connected { color: var(--text-success); }
+.qvac-status.is-disconnected { color: var(--text-warning); }

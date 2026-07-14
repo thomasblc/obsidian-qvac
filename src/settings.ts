@@ -54,7 +54,8 @@ export class QvacSettingTab extends PluginSettingTab {
       statusEl.setText("Checking...");
       const h = await this.plugin.checkHealth();
       statusEl.setText(h ? `Connected (v${h.version}).` : "Not running. Start the QVAC companion app, then Recheck.");
-      statusEl.style.color = h ? "var(--text-success)" : "var(--text-warning)";
+      statusEl.toggleClass("is-connected", !!h);
+      statusEl.toggleClass("is-disconnected", !h);
     };
     statusSetting.addButton((b) => b.setButtonText("Recheck").onClick(refresh));
     refresh();

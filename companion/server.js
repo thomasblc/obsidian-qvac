@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 // QVAC for Obsidian - companion daemon (Phase 0a).
 // ONE daemon serves ALL vaults (multiplexed by vaultId), owning the single ~/.qvac worker.
 // Transport: WebSocket for streaming/control, HTTP for /health + a non-stream /chat fallback.
