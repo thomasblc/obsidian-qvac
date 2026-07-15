@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.8 - 2026-07 - Connect honors the custom model
+
+- Fix: the Connect scan now uses your custom chat model too (it was still pulling the default
+  registry model, which a custom-model user has not downloaded). Requires companion >= 0.2.8.
+
 ## 0.2.7 - 2026-07 - Settings gear + bring your own model
 
 - **Settings gear in the panel header** opens the plugin settings directly (no more hunting).

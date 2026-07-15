@@ -104,10 +104,10 @@ function noteVectors(idx) {
 // LLM judges whether a wikilink between two notes is warranted (the differentiator: reasoning,
 // not just cosine). One constrained line ("YES - reason" / "NO") is far more robust from a 4B
 // than asking for JSON.
-async function judgeLink(a, b) {
+async function judgeLink(a, b, modelSrc = null) {
   const sys = "You decide whether two notes from a personal knowledge base should be linked with a wikilink. Link them only if they share a genuinely related topic, person, project, or idea, such that a reader of one would want to jump to the other. Generic overlap (both are notes, both mention a date) is NOT enough. Reply with exactly one line: `YES - <reason, max 8 words>` or `NO`.";
   const user = `Note A (${a.source}):\n${a.text}\n\nNote B (${b.source}):\n${b.text}\n\nShould A and B be linked?`;
-  const r = await mm.chat([{ role: "system", content: sys }, { role: "user", content: user }], { baseKey: CHAT_BASE, reasoningBudget: 0 });
+  const r = await mm.chat([{ role: "system", content: sys }, { role: "user", content: user }], { baseKey: CHAT_BASE, modelSrc, reasoningBudget: 0 });
   const line = String(r.contentText || "").trim().split("\n")[0].trim();
   if (/^yes\b/i.test(line)) return { link: true, reason: (line.replace(/^yes\s*[-:]?\s*/i, "").trim() || "related").slice(0, 80) };
   return { link: false, reason: "" };
@@ -187,6 +187,7 @@ const handlers = {
   // an existing edge or waste a judge call on it.
   async "connect.scan"(msg, push) {
     const { vaultId, existingPairs = [], minScore = 0.35, maxCandidates = 20, judge = true } = msg;
+    const modelSrc = customModelSrc(msg);
     const idx = getIndex(vaultId);
     let notes = noteVectors(idx);
     // bound the O(N^2) pairwise scan so a huge (or hostile synced) vault can't wedge the worker
@@ -215,7 +216,7 @@ const handlers = {
       n++;
       if (push) push({ type: "connect.progress", done: n, total: top.length });
       let link = true, reason = "semantically related";
-      if (judge) { const v = await judgeLink(p.a, p.b); link = v.link; reason = v.reason; }
+      if (judge) { const v = await judgeLink(p.a, p.b, modelSrc); link = v.link; reason = v.reason; }
       if (link) out.push({ a: p.a.source, b: p.b.source, score: Number(p.score.toFixed(3)), reason });
     }
     return { candidates: out, scanned: top.length, notes: notes.length, capped };
