@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.12 - 2026-07 - Note-path hardening
+
+- Create note rejects a hand-typed `..` path so it can never write outside the vault.
+
 ## 0.2.11 - 2026-07 - Create notes, select text, link all
 
 - **Create a note from a chat answer.** Each answer gets a "Create note" button: confirm the path

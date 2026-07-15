@@ -130,6 +130,9 @@ export default class QvacPlugin extends Plugin {
   async createNote(rawPath: string, content: string) {
     let p = rawPath.trim().replace(/^\/+/, "");
     if (!p) return;
+    // Never let a hand-typed "../" escape the vault (getAbstractFileByPath returns null for
+    // out-of-vault paths, so the overwrite guard alone would not catch it).
+    if (p.split("/").includes("..")) { new Notice("QVAC: invalid path (no '..' allowed)"); return; }
     if (!p.toLowerCase().endsWith(".md")) p += ".md";
     const dir = p.includes("/") ? p.slice(0, p.lastIndexOf("/")) : "";
     if (dir) {
