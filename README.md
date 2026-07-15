@@ -68,8 +68,6 @@ npm test                              # plugin unit tests
 ./dev/run-dev.sh "/path/to/Vault"     # build + install into a vault + start the companion
 ```
 
-See [`docs/SUBMISSION.md`](docs/SUBMISSION.md) for the community-directory submission checklist.
-
 ## License
 
 MIT (plugin). The companion depends on `@qvac/sdk` (Apache-2.0).
