@@ -16,11 +16,11 @@ export class ReviewModal extends Modal {
     contentEl.createEl("h3", { text: this.heading });
 
     const orig = contentEl.createDiv({ cls: "qvac-review-block" });
-    orig.createEl("div", { cls: "qvac-review-label", text: "Original" });
+    orig.createDiv({ cls: "qvac-review-label", text: "Original" });
     orig.createDiv({ cls: "qvac-review-text", text: this.original });
 
     const res = contentEl.createDiv({ cls: "qvac-review-block" });
-    res.createEl("div", { cls: "qvac-review-label", text: "QVAC" });
+    res.createDiv({ cls: "qvac-review-label", text: "QVAC" });
     this.resultEl = res.createDiv({ cls: "qvac-review-text", text: "…" });
 
     const btns = contentEl.createDiv({ cls: "qvac-review-btns" });

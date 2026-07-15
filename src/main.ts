@@ -1,9 +1,14 @@
-import { Plugin, WorkspaceLeaf, TFile, Notice, Editor, requestUrl } from "obsidian";
+import { Plugin, WorkspaceLeaf, TFile, Notice, Editor, requestUrl, FileSystemAdapter } from "obsidian";
 import { WsClient } from "./lib/ws";
 import { readDaemonInfo, wsUrl, DaemonInfo } from "./lib/daemon";
 import { vaultId as computeVaultId } from "./lib/vaultid";
 import { planTextIndex } from "./lib/diff";
 import { insertRelatedSection } from "./lib/links";
+import type {
+  Hit, Adapter, ChatMessage, ManifestEntry,
+  Health, ChatData, CompleteData, HitsData, ScanData, TrainData, AdaptersData, ManifestData,
+  ChatFrame, CompleteFrame, ProvisionFrame, ScanFrame, TrainFrame,
+} from "./lib/rpc";
 import { QvacSettings, DEFAULT_SETTINGS, migrateSettings, QvacSettingTab } from "./settings";
 import { QvacView, VIEW_TYPE_QVAC, QvacTab } from "./qvac-view";
 import { ReviewModal } from "./review-modal";
@@ -15,6 +20,12 @@ const INLINE_CMDS: { id: string; name: string; title: string; instruction: strin
   { id: "expand-selection", name: "Expand selection", title: "Expand", instruction: "Expand the following into a fuller paragraph. Output only the expanded text." },
 ];
 
+function errMsg(e: unknown): string {
+  if (e instanceof Error) return e.message;
+  if (typeof e === "string") return e;
+  try { return JSON.stringify(e); } catch { return "unknown error"; }
+}
+
 export default class QvacPlugin extends Plugin {
   settings: QvacSettings = DEFAULT_SETTINGS;
   ws: WsClient | null = null;
@@ -24,16 +35,17 @@ export default class QvacPlugin extends Plugin {
 
   async onload() {
     await this.loadSettings();
-    try { this.vaultId = computeVaultId((this.app.vault.adapter as any).getBasePath()); } catch { /* */ }
+    const adapter = this.app.vault.adapter;
+    if (adapter instanceof FileSystemAdapter) this.vaultId = computeVaultId(adapter.getBasePath());
 
     this.registerView(VIEW_TYPE_QVAC, (leaf) => new QvacView(leaf, this));
-    this.addRibbonIcon("bot", "QVAC", () => this.activateView("chat"));
-    this.addCommand({ id: "open-chat", name: "Open chat", callback: () => this.activateView("chat") });
-    this.addCommand({ id: "open-search", name: "Open semantic search", callback: () => this.activateView("search") });
-    this.addCommand({ id: "open-connect", name: "Open Connect (find missing links)", callback: () => this.activateView("connect") });
-    this.addCommand({ id: "open-train", name: "Train a model on your vault", callback: () => this.activateView("train") });
-    this.addCommand({ id: "index-vault", name: "Index vault (incremental)", callback: () => this.indexVault(false) });
-    this.addCommand({ id: "reindex-vault", name: "Reindex vault (full)", callback: () => this.indexVault(true) });
+    this.addRibbonIcon("bot", "QVAC", () => { void this.activateView("chat"); });
+    this.addCommand({ id: "open-chat", name: "Open chat", callback: () => { void this.activateView("chat"); } });
+    this.addCommand({ id: "open-search", name: "Open semantic search", callback: () => { void this.activateView("search"); } });
+    this.addCommand({ id: "open-connect", name: "Open Connect (find missing links)", callback: () => { void this.activateView("connect"); } });
+    this.addCommand({ id: "open-train", name: "Train a model on your vault", callback: () => { void this.activateView("train"); } });
+    this.addCommand({ id: "index-vault", name: "Index vault (incremental)", callback: () => { void this.indexVault(false); } });
+    this.addCommand({ id: "reindex-vault", name: "Reindex vault (full)", callback: () => { void this.indexVault(true); } });
     this.addSettingTab(new QvacSettingTab(this.app, this));
 
     // Inline writing commands (selection -> review modal -> apply).
@@ -43,12 +55,14 @@ export default class QvacPlugin extends Plugin {
       for (const c of INLINE_CMDS.slice(0, 3)) menu.addItem((i) => i.setTitle("QVAC: " + c.title).setIcon("bot").onClick(() => this.runInline(editor, c.title, c.instruction)));
     }));
 
-    this.app.workspace.onLayoutReady(async () => {
-      const up = await this.ensureDaemon();
-      // Only auto-index once the models are provisioned; otherwise the first embed-doc triggers a
-      // multi-GB download inside a 60s rpc timeout and fails. Un-provisioned users go through the
-      // Setup panel in the view first (which streams download progress).
-      if (up && this.settings.provisioned && this.settings.indexOnStartup) this.indexVault(false);
+    this.app.workspace.onLayoutReady(() => {
+      void (async () => {
+        const up = await this.ensureDaemon();
+        // Only auto-index once the models are provisioned; otherwise the first embed-doc triggers a
+        // multi-GB download inside a 60s rpc timeout and fails. Un-provisioned users go through the
+        // Setup panel in the view first (which streams download progress).
+        if (up && this.settings.provisioned && this.settings.indexOnStartup) await this.indexVault(false);
+      })();
     });
   }
 
@@ -58,14 +72,14 @@ export default class QvacPlugin extends Plugin {
   async saveSettings() { await this.saveData(this.settings); }
 
   // ---- companion daemon ----
-  async checkHealth() {
+  async checkHealth(): Promise<Health | null> {
     this.daemon = readDaemonInfo();
     if (!this.daemon) return null;
     if (!this.ws) this.ws = new WsClient(wsUrl(this.daemon));
     else this.ws.setUrl(wsUrl(this.daemon));
     // Liveness over WS, NOT an HTTP fetch: the renderer (origin app://obsidian.md) CORS-blocks a
     // plain fetch to a localhost server, but a WebSocket is exempt. This is the one transport gotcha.
-    try { const r = await this.ws.rpc("health", {}, { timeoutMs: 6000 }); return r.ok ? r.data : null; }
+    try { const r = await this.ws.rpc<Health>("health", {}, { timeoutMs: 6000 }); return r.ok ? (r.data ?? null) : null; }
     catch { return null; }
   }
   async ensureDaemon(): Promise<boolean> { return (await this.checkHealth()) !== null; }
@@ -75,19 +89,19 @@ export default class QvacPlugin extends Plugin {
   }
 
   // ---- chat ----
-  async chat(message: string, history: any[], onFrame: (f: any) => void) {
+  async chat(message: string, history: ChatMessage[], onFrame: (f: ChatFrame) => void) {
     const ws = await this.ensureWs();
     const voice = this.settings.voiceEnabled && !!this.settings.voiceAdapter;
-    return ws.rpc("chat", { vaultId: this.vaultId, message, history, memory: true, voice, adapter: this.settings.voiceAdapter || null, baseKey: this.settings.chatBaseKey }, { onFrame, timeoutMs: 180000 });
+    return ws.rpc<ChatData, ChatFrame>("chat", { vaultId: this.vaultId, message, history, memory: true, voice, adapter: this.settings.voiceAdapter || null, baseKey: this.settings.chatBaseKey }, { onFrame, timeoutMs: 180000 });
   }
 
   // ---- first-run provisioning: download the models with visible progress (instead of a silent
   // multi-GB stall inside a timed rpc). Embeddings enable search + Connect in minutes; chat second.
-  async provision(onFrame: (f: any) => void) {
+  async provision(onFrame: (f: ProvisionFrame) => void) {
     const ws = await this.ensureWs();
-    return ws.rpc("provision", {}, { onFrame, timeoutMs: 60 * 60 * 1000 });
+    return ws.rpc<unknown, ProvisionFrame>("provision", {}, { onFrame, timeoutMs: 60 * 60 * 1000 });
   }
-  isProvisioned(): boolean { return !!this.settings.provisioned; }
+  isProvisioned(): boolean { return this.settings.provisioned; }
   async markProvisioned() { this.settings.provisioned = true; await this.saveSettings(); }
 
   async openSource(source: string) {
@@ -97,38 +111,38 @@ export default class QvacPlugin extends Plugin {
   }
 
   // ---- inline writing commands + related notes ----
-  async complete(system: string, message: string, onFrame?: (f: any) => void) {
+  async complete(system: string, message: string, onFrame?: (f: CompleteFrame) => void) {
     const ws = await this.ensureWs();
-    return ws.rpc("complete", { system, message }, { onFrame, timeoutMs: 120000 });
+    return ws.rpc<CompleteData, CompleteFrame>("complete", { system, message }, { onFrame, timeoutMs: 120000 });
   }
-  async related(text: string, excludePath: string): Promise<any[]> {
+  async related(text: string, excludePath: string): Promise<Hit[]> {
     let ws: WsClient;
     try { ws = await this.ensureWs(); } catch { return []; }
-    const r = await ws.rpc("related", { vaultId: this.vaultId, text, excludePath, topK: 6 }, { timeoutMs: 30000 });
-    return r.ok ? (r.data?.hits || []) : [];
+    const r = await ws.rpc<HitsData>("related", { vaultId: this.vaultId, text, excludePath, topK: 6 }, { timeoutMs: 30000 });
+    return r.ok ? (r.data?.hits ?? []) : [];
   }
-  async search(query: string): Promise<any[]> {
+  async search(query: string): Promise<Hit[]> {
     const ws = await this.ensureWs();
-    const r = await ws.rpc("search", { vaultId: this.vaultId, query, topK: 12 }, { timeoutMs: 30000 });
-    return r.ok ? (r.data?.hits || []) : [];
+    const r = await ws.rpc<HitsData>("search", { vaultId: this.vaultId, query, topK: 12 }, { timeoutMs: 30000 });
+    return r.ok ? (r.data?.hits ?? []) : [];
   }
 
   // ---- connect (find + create the missing [[links]]) ----
   // Obsidian's resolved-links graph: { sourcePath: { targetPath: count } }. We read it to know what
   // is ALREADY linked, so the scan never re-proposes an existing edge.
   existingLinkPairs(): string[][] {
-    const rl = (this.app.metadataCache as any).resolvedLinks || {};
+    const rl = this.app.metadataCache.resolvedLinks;
     const out: string[][] = [];
     for (const a of Object.keys(rl)) for (const b of Object.keys(rl[a] || {})) out.push([a, b]);
     return out;
   }
   linkedTargetsOf(fromPath: string): string[] {
-    const rl = (this.app.metadataCache as any).resolvedLinks || {};
+    const rl = this.app.metadataCache.resolvedLinks;
     return Object.keys(rl[fromPath] || {});
   }
-  async connectScan(existingPairs: string[][], onFrame: (f: any) => void) {
+  async connectScan(existingPairs: string[][], onFrame: (f: ScanFrame) => void) {
     const ws = await this.ensureWs();
-    return ws.rpc("connect.scan", { vaultId: this.vaultId, existingPairs, minScore: 0.3, maxCandidates: 20 }, { onFrame, timeoutMs: 10 * 60 * 1000 });
+    return ws.rpc<ScanData, ScanFrame>("connect.scan", { vaultId: this.vaultId, existingPairs, minScore: 0.3, maxCandidates: 20 }, { onFrame, timeoutMs: 10 * 60 * 1000 });
   }
   // Insert [[to]] into the note `from`, under a "## Related" section (created if missing). Uses
   // vault.process (atomic read-modify-write). Hardened (review-pass): identity dedup via the
@@ -150,26 +164,31 @@ export default class QvacPlugin extends Plugin {
     if (!sel.trim()) { new Notice("QVAC: select some text first"); return; }
     const modal = new ReviewModal(this.app, title, sel, (text) => editor.replaceSelection(text));
     modal.open();
-    this.complete(instruction, sel, (f) => { if (f.type === "complete.token") modal.appendToken(f.text); })
-      .then((r) => { if (r.ok) modal.setResult(r.data?.contentText || ""); else modal.fail(r.error || "failed"); })
-      .catch((e) => modal.fail(e?.message || String(e)));
+    this.complete(instruction, sel, (f) => { if (f.type === "complete.token") modal.appendToken(f.text ?? ""); })
+      .then((r) => { if (r.ok) modal.setResult(r.data?.contentText ?? ""); else modal.fail(r.error ?? "failed"); })
+      .catch((e: unknown) => modal.fail(errMsg(e)));
   }
   // ---- training (optional LoRA voice) ----
-  getVaultPath(): string { try { return (this.app.vault.adapter as any).getBasePath(); } catch { return ""; } }
-  async trainStart(opts: { epochs?: number }, onFrame: (f: any) => void) {
-    const ws = await this.ensureWs();
-    return ws.rpc("train.start", { vaultId: this.vaultId, vaultPath: this.getVaultPath(), baseKey: "1.7b", epochs: opts.epochs ?? 1 }, { onFrame, timeoutMs: 30 * 60 * 1000 });
+  getVaultPath(): string {
+    const adapter = this.app.vault.adapter;
+    return adapter instanceof FileSystemAdapter ? adapter.getBasePath() : "";
   }
-  async trainList(): Promise<any[]> { const ws = await this.ensureWs(); const r = await ws.rpc("train.list"); return r.ok ? (r.data?.adapters || []) : []; }
-  async trainDelete(file: string): Promise<any[]> { const ws = await this.ensureWs(); const r = await ws.rpc("train.delete", { file }); return r.ok ? (r.data?.adapters || []) : []; }
+  async trainStart(opts: { epochs?: number }, onFrame: (f: TrainFrame) => void) {
+    const ws = await this.ensureWs();
+    return ws.rpc<TrainData, TrainFrame>("train.start", { vaultId: this.vaultId, vaultPath: this.getVaultPath(), baseKey: "1.7b", epochs: opts.epochs ?? 1 }, { onFrame, timeoutMs: 30 * 60 * 1000 });
+  }
+  async trainList(): Promise<Adapter[]> { const ws = await this.ensureWs(); const r = await ws.rpc<AdaptersData>("train.list"); return r.ok ? (r.data?.adapters ?? []) : []; }
+  async trainDelete(file: string): Promise<Adapter[]> { const ws = await this.ensureWs(); const r = await ws.rpc<AdaptersData>("train.delete", { file }); return r.ok ? (r.data?.adapters ?? []) : []; }
   async setVoiceAdapter(file: string | null) { this.settings.voiceAdapter = file; this.settings.voiceEnabled = !!file; await this.saveSettings(); }
   // OCR an image's bytes via the daemon. Uses requestUrl (Obsidian's Node HTTP client) which
   // bypasses CORS for a localhost POST that a renderer fetch would be blocked from making.
   async ocrImage(bytes: ArrayBuffer, ext: string): Promise<string> {
     if (!this.daemon && !(await this.ensureDaemon())) throw new Error("companion not running");
-    const d = this.daemon!;
+    const d = this.daemon;
+    if (!d) throw new Error("companion not running");
     const r = await requestUrl({ url: `http://127.0.0.1:${d.port}/api/ocr?t=${encodeURIComponent(d.token)}&ext=${encodeURIComponent(ext)}`, method: "POST", body: bytes, throw: false });
-    return (r.json && r.json.data && r.json.data.text) || "";
+    const j = r.json as { data?: { text?: string } } | undefined;
+    return j?.data?.text ?? "";
   }
   // ---- incremental indexing ----
   private excluded(p: string): boolean {
@@ -188,7 +207,7 @@ export default class QvacPlugin extends Plugin {
   async indexVault(full: boolean) {
     if (this.indexing) { new Notice("QVAC: already indexing"); return; }
     let ws: WsClient;
-    try { ws = await this.ensureWs(); } catch (e: any) { new Notice(e.message); return; }
+    try { ws = await this.ensureWs(); } catch (e) { new Notice(errMsg(e)); return; }
     this.indexing = true;
     const notice = new Notice("QVAC: indexing…", 0);
     try {
@@ -198,7 +217,8 @@ export default class QvacPlugin extends Plugin {
       // diff - otherwise diffManifest would put every image in `toDrop` (they're not in the md-only
       // `local`) and the OCR loop would then skip re-embedding them on an mtime match => image search
       // silently oscillates on/off every other run. (P0)
-      const remoteFull: Record<string, any> = (await ws.rpc("index-manifest", { vaultId: this.vaultId })).data?.manifest || {};
+      const manifestRes = await ws.rpc<ManifestData>("index-manifest", { vaultId: this.vaultId });
+      const remoteFull: Record<string, ManifestEntry> = manifestRes.data?.manifest ?? {};
       const { toUpsert, toDrop, imgRemote } = planTextIndex(local, remoteFull, full);
       let done = 0;
       for (const p of toUpsert) {
@@ -231,10 +251,10 @@ export default class QvacPlugin extends Plugin {
         for (const p of Object.keys(imgRemote)) if (!live.has(p)) { await ws.rpc("drop-doc", { vaultId: this.vaultId, path: p }); imgDropped++; }
       }
       notice.setMessage(`QVAC: indexed ${toUpsert.length} changed, ${toDrop.length + imgDropped} removed${imgDone ? `, ${imgDone} image(s)` : ""}`);
-      setTimeout(() => notice.hide(), 4000);
-    } catch (e: any) {
-      notice.setMessage("QVAC: index failed - " + (e?.message || e));
-      setTimeout(() => notice.hide(), 6000);
+      window.setTimeout(() => notice.hide(), 4000);
+    } catch (e) {
+      notice.setMessage("QVAC: index failed - " + errMsg(e));
+      window.setTimeout(() => notice.hide(), 6000);
     } finally { this.indexing = false; }
   }
 
@@ -246,7 +266,7 @@ export default class QvacPlugin extends Plugin {
       if (leaf) await leaf.setViewState({ type: VIEW_TYPE_QVAC, active: true });
     }
     if (leaf) {
-      workspace.revealLeaf(leaf);
+      await workspace.revealLeaf(leaf);
       if (tab && leaf.view instanceof QvacView) leaf.view.setTab(tab);
     }
   }

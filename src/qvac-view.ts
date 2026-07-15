@@ -1,8 +1,15 @@
-import { ItemView, WorkspaceLeaf, MarkdownRenderer, Notice, TFile, debounce, setIcon } from "obsidian";
+import { ItemView, WorkspaceLeaf, MarkdownRenderer, Notice, debounce, setIcon } from "obsidian";
 import type QvacPlugin from "./main";
+import type { Hit, Adapter, ChatMessage, Candidate, Health, ChatFrame, ProvisionFrame, ScanFrame, TrainFrame } from "./lib/rpc";
 
 export const VIEW_TYPE_QVAC = "qvac-view";
 export type QvacTab = "chat" | "search" | "connect" | "train";
+
+function errMsg(e: unknown): string {
+  if (e instanceof Error) return e.message;
+  if (typeof e === "string") return e;
+  try { return JSON.stringify(e); } catch { return "unknown error"; }
+}
 
 // One unified, QVAC-branded panel with four tabs. Surfaces every feature in one place:
 // Chat, AI Search (semantic), Connect (related notes + create the missing [[links]]), Train.
@@ -14,7 +21,7 @@ export class QvacView extends ItemView {
   private statusText: HTMLElement;
 
   // chat
-  private history: { role: string; content: string }[] = [];
+  private history: ChatMessage[] = [];
   private chatBusy = false;
   private chatAbort = false; // Stop button: ignore further tokens for the current turn
 
@@ -38,7 +45,7 @@ export class QvacView extends ItemView {
   getDisplayText() { return "QVAC"; }
   getIcon() { return "bot"; }
 
-  async onOpen() {
+  onOpen(): Promise<void> {
     const root = this.contentEl;
     root.empty();
     root.addClass("qvac");
@@ -51,7 +58,7 @@ export class QvacView extends ItemView {
     const status = header.createDiv({ cls: "qvac-conn" });
     this.statusDot = status.createSpan({ cls: "qvac-dot" });
     this.statusText = status.createSpan({ cls: "qvac-conn-text", text: "…" });
-    this.refreshStatus();
+    void this.refreshStatus();
 
     // tab bar
     this.tabsEl = root.createDiv({ cls: "qvac-tabs" });
@@ -73,29 +80,33 @@ export class QvacView extends ItemView {
     this.setTab(this.tab);
 
     // refresh Connect's per-note section on note switch (debounced; file-open fires twice)
-    this.registerEvent(this.app.workspace.on("file-open", debounce(() => { if (this.tab === "connect") this.renderConnect(); }, 400, true)));
+    this.registerEvent(this.app.workspace.on("file-open", debounce(() => { if (this.tab === "connect") void this.renderConnect(); }, 400, true)));
+    return Promise.resolve();
   }
-  async onClose() { /* */ }
+  onClose(): Promise<void> { return Promise.resolve(); }
 
   async refreshStatus() {
-    const h = await this.plugin.checkHealth().catch(() => null);
+    let h: Health | null = null;
+    try { h = await this.plugin.checkHealth(); } catch { h = null; }
     const on = !!h;
     this.statusDot?.toggleClass("on", on);
     this.statusDot?.toggleClass("off", !on);
-    if (this.statusText) this.statusText.setText(on ? `connected · ${h.version}` : "companion offline");
+    if (this.statusText) this.statusText.setText(h ? `connected · ${h.version}` : "companion offline");
   }
 
   setTab(tab: QvacTab) {
     this.tab = tab;
-    for (const el of Array.from(this.tabsEl.children)) (el as HTMLElement).toggleClass("active", (el as HTMLElement).dataset.tab === tab);
+    for (const el of Array.from(this.tabsEl.children)) {
+      if (el.instanceOf(HTMLElement)) el.toggleClass("active", el.dataset.tab === tab);
+    }
     this.bodyEl.empty();
     // Until the models are downloaded, every tab shows the one-time Setup panel (no silent multi-GB
     // download inside a chat/index timeout).
     if (!this.plugin.isProvisioned()) { this.renderSetup(); return; }
     if (tab === "chat") this.renderChat();
     else if (tab === "search") this.renderSearch();
-    else if (tab === "connect") this.renderConnect();
-    else if (tab === "train") this.renderTrain();
+    else if (tab === "connect") void this.renderConnect();
+    else if (tab === "train") void this.renderTrain();
   }
 
   // ---------- SETUP (first-run provisioning) ----------
@@ -110,21 +121,21 @@ export class QvacView extends ItemView {
     btn.onclick = async () => {
       btn.disabled = true; barWrap.removeClass("hidden"); status.setText("Starting download…");
       try {
-        const res = await this.plugin.provision((f: any) => {
+        const res = await this.plugin.provision((f: ProvisionFrame) => {
           if (f.type === "provision.progress") {
             const p = f.percentage;
             status.setText(`Downloading ${f.model === "embed" ? "embeddings" : "chat"} model${p != null ? ` · ${Math.round(p)}%` : "…"}`);
-            if (p != null) bar.style.width = Math.max(2, Math.round(p)) + "%";
+            if (p != null) bar.setCssStyles({ width: Math.max(2, Math.round(p)) + "%" });
           }
         });
         if (res.ok) {
           await this.plugin.markProvisioned();
           status.setText("Done. Indexing your vault…");
-          this.plugin.indexVault(false);
+          void this.plugin.indexVault(false);
           new Notice("QVAC is ready.");
           this.setTab(this.tab); // re-render the real tab now that we're provisioned
-        } else status.setText("Setup failed: " + (res.error || "unknown"));
-      } catch (e: any) { status.setText("Setup failed: " + (e?.message || e)); }
+        } else status.setText("Setup failed: " + (res.error ?? "unknown"));
+      } catch (e) { status.setText("Setup failed: " + errMsg(e)); }
       finally { btn.disabled = false; }
     };
   }
@@ -134,7 +145,7 @@ export class QvacView extends ItemView {
     const wrap = this.bodyEl.createDiv({ cls: "qvac-chat" });
     const toolbar = wrap.createDiv({ cls: "qvac-chat-toolbar" });
     const voiceBtn = toolbar.createEl("button", { cls: "qvac-pill" });
-    const setVoiceLabel = () => { const on = this.plugin.settings.voiceEnabled && this.plugin.settings.voiceAdapter; voiceBtn.toggleClass("on", !!on); voiceBtn.setText(on ? "✓ Vault model" : "Vault model"); };
+    const setVoiceLabel = () => { const on = this.plugin.settings.voiceEnabled && !!this.plugin.settings.voiceAdapter; voiceBtn.toggleClass("on", on); voiceBtn.setText(on ? "✓ Vault model" : "Vault model"); };
     setVoiceLabel();
     voiceBtn.onclick = async () => {
       if (!this.plugin.settings.voiceAdapter) { new Notice("QVAC: train a vault model first (Train tab)"); this.setTab("train"); return; }
@@ -145,64 +156,65 @@ export class QvacView extends ItemView {
     clearBtn.onclick = () => { this.history = []; messages.empty(); };
 
     const messages = wrap.createDiv({ cls: "qvac-messages" });
-    for (const m of this.history) this.renderMsg(messages, m.role as any, m.content, []);
+    for (const m of this.history) this.renderMsg(messages, m.role === "user" ? "user" : "assistant", m.content, []);
 
     const inputRow = wrap.createDiv({ cls: "qvac-input" });
     const ta = inputRow.createEl("textarea", { attr: { rows: "1", placeholder: "Ask your vault…" } });
-    ta.addEventListener("input", () => { ta.style.height = "auto"; ta.style.height = Math.min(ta.scrollHeight, 140) + "px"; });
-    ta.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); this.chatBusy ? stop() : send(); } });
+    ta.addEventListener("input", () => { ta.setCssStyles({ height: "auto" }); ta.setCssStyles({ height: Math.min(ta.scrollHeight, 140) + "px" }); });
+    ta.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); if (this.chatBusy) stop(); else void send(); } });
     const sendBtn = inputRow.createEl("button", { cls: "qvac-send" }); setIcon(sendBtn, "arrow-up");
     const setBtn = (busy: boolean) => { sendBtn.empty(); setIcon(sendBtn, busy ? "square" : "arrow-up"); sendBtn.toggleClass("stop", busy); sendBtn.setAttr("aria-label", busy ? "Stop" : "Send"); };
     const stop = () => { if (this.chatBusy) this.chatAbort = true; };
     const send = async () => {
       const q = ta.value.trim(); if (!q || this.chatBusy) return;
-      ta.value = ""; ta.style.height = "auto"; this.chatBusy = true; this.chatAbort = false; setBtn(true);
+      ta.value = ""; ta.setCssStyles({ height: "auto" }); this.chatBusy = true; this.chatAbort = false; setBtn(true);
       this.renderMsg(messages, "user", q, []);
       const body = this.renderMsg(messages, "assistant", "", []);
-      const bodyText = body.querySelector(".qvac-msg-body") as HTMLElement;
+      const bodyText = body.querySelector<HTMLElement>(".qvac-msg-body");
+      if (!bodyText) { this.chatBusy = false; setBtn(false); return; }
       bodyText.addClass("qvac-typing"); bodyText.setText("…");
-      let acc = "", hits: any[] = [], lastRender = 0;
+      let acc = "", hits: Hit[] = [], lastRender = 0;
       const paint = (final = false) => {
         const now = Date.now();
         if (!final && now - lastRender < 150) return; // throttle markdown re-render during streaming
         lastRender = now; bodyText.removeClass("qvac-typing");
-        this.renderMd(bodyText, acc); messages.scrollTop = messages.scrollHeight;
+        void this.renderMd(bodyText, acc); messages.scrollTop = messages.scrollHeight;
       };
       try {
-        const res = await this.plugin.chat(q, this.history, (f: any) => {
+        const res = await this.plugin.chat(q, this.history, (f: ChatFrame) => {
           if (this.chatAbort) return;
-          if (f.type === "chat.start") hits = f.hits || [];
-          else if (f.type === "chat.token") { acc += f.text; paint(); }
-          else if (f.type === "chat.error") { acc += (acc ? "\n\n" : "") + "_Error: " + (f.error || "unknown") + "_"; paint(true); }
+          if (f.type === "chat.start") hits = f.hits ?? [];
+          else if (f.type === "chat.token") { acc += f.text ?? ""; paint(); }
+          else if (f.type === "chat.error") { acc += (acc ? "\n\n" : "") + "_Error: " + (f.error ?? "unknown") + "_"; paint(true); }
         });
         if (this.chatAbort) {
           acc += (acc ? "\n\n" : "") + "_(stopped)_";
           await this.renderMd(bodyText, acc);
           this.history.push({ role: "user", content: q }); this.history.push({ role: "assistant", content: acc });
         } else if (res.ok) {
-          acc = res.data?.contentText || acc; hits = res.data?.hits || hits;
+          acc = res.data?.contentText ?? acc; hits = res.data?.hits ?? hits;
           await this.renderMd(bodyText, acc || "(no answer)");
           this.renderCites(body, hits);
           this.history.push({ role: "user", content: q }); this.history.push({ role: "assistant", content: acc });
           if (res.data?.model?.includes("voice")) body.createDiv({ cls: "qvac-msg-model", text: "answered from your vault model" });
-        } else { bodyText.removeClass("qvac-typing"); bodyText.setText("Error: " + (res.error || "unknown")); }
-      } catch (e: any) { bodyText.removeClass("qvac-typing"); bodyText.setText("Error: " + (e?.message || e)); }
+        } else { bodyText.removeClass("qvac-typing"); bodyText.setText("Error: " + (res.error ?? "unknown")); }
+      } catch (e) { bodyText.removeClass("qvac-typing"); bodyText.setText("Error: " + errMsg(e)); }
       finally { this.chatBusy = false; this.chatAbort = false; setBtn(false); messages.scrollTop = messages.scrollHeight; }
     };
-    sendBtn.onclick = () => { this.chatBusy ? stop() : send(); };
-    setTimeout(() => ta.focus(), 0);
+    sendBtn.onclick = () => { if (this.chatBusy) stop(); else void send(); };
+    window.setTimeout(() => ta.focus(), 0);
   }
-  private renderMsg(container: HTMLElement, role: "user" | "assistant", text: string, hits: any[]): HTMLElement {
+  private renderMsg(container: HTMLElement, role: "user" | "assistant", text: string, hits: Hit[]): HTMLElement {
     const el = container.createDiv({ cls: `qvac-msg qvac-msg-${role}` });
     el.createDiv({ cls: "qvac-msg-role", text: role === "user" ? "You" : "QVAC" });
     const b = el.createDiv({ cls: "qvac-msg-body" });
     if (text) b.setText(text);
-    if (hits?.length) this.renderCites(el, hits);
+    if (hits.length) this.renderCites(el, hits);
     container.scrollTop = container.scrollHeight;
     return el;
   }
-  private renderCites(msgEl: HTMLElement, hits: any[]) {
-    if (!hits?.length) return;
+  private renderCites(msgEl: HTMLElement, hits: Hit[]) {
+    if (!hits.length) return;
     const wrap = msgEl.createDiv({ cls: "qvac-cites" });
     const seen = new Set<string>(); let n = 0;
     for (const h of hits) {
@@ -210,7 +222,7 @@ export class QvacView extends ItemView {
       const chip = wrap.createEl("a", { cls: "qvac-cite", href: "#" });
       const ic = chip.createSpan({ cls: "qvac-cite-ic" }); setIcon(ic, h.sourceType === "image" ? "image" : "file-text");
       chip.createSpan({ text: `${n}. ${h.source.replace(/\.md$/, "")}` });
-      chip.onclick = (e) => { e.preventDefault(); this.plugin.openSource(h.source); };
+      chip.onclick = (e) => { e.preventDefault(); void this.plugin.openSource(h.source); };
     }
   }
 
@@ -231,14 +243,14 @@ export class QvacView extends ItemView {
           const card = results.createDiv({ cls: "qvac-result" });
           const top = card.createDiv({ cls: "qvac-result-top" });
           const a = top.createEl("a", { cls: "qvac-result-title", text: h.source.replace(/\.md$/, ""), href: "#" });
-          a.onclick = (e) => { e.preventDefault(); this.plugin.openSource(h.source); };
-          top.createSpan({ cls: "qvac-result-score", text: Math.round((h.score || 0) * 100) + "%" });
-          card.createDiv({ cls: "qvac-result-snippet", text: (h.content || "").slice(0, 180) });
+          a.onclick = (e) => { e.preventDefault(); void this.plugin.openSource(h.source); };
+          top.createSpan({ cls: "qvac-result-score", text: Math.round((h.score ?? 0) * 100) + "%" });
+          card.createDiv({ cls: "qvac-result-snippet", text: (h.content ?? "").slice(0, 180) });
         }
-      } catch (e: any) { results.empty(); results.setText("Search unavailable: " + (e?.message || e)); }
+      } catch (e) { results.empty(); results.setText("Search unavailable: " + errMsg(e)); }
     };
-    inp.addEventListener("keydown", (e) => { if (e.key === "Enter") run(); });
-    setTimeout(() => inp.focus(), 0);
+    inp.addEventListener("keydown", (e) => { if (e.key === "Enter") void run(); });
+    window.setTimeout(() => inp.focus(), 0);
   }
 
   // ---------- CONNECT (related notes + create the missing [[links]]) ----------
@@ -254,13 +266,13 @@ export class QvacView extends ItemView {
     scanBtn.onclick = async () => {
       scanBtn.disabled = true; scanStatus.setText("Scanning…"); scanResults.empty();
       try {
-        const res = await this.plugin.connectScan(this.plugin.existingLinkPairs(), (f: any) => {
+        const res = await this.plugin.connectScan(this.plugin.existingLinkPairs(), (f: ScanFrame) => {
           if (f.type === "connect.progress") scanStatus.setText(`Judging ${f.done}/${f.total} candidates…`);
         });
         const cands = (res.ok && res.data?.candidates) || [];
         scanStatus.setText(cands.length ? `${cands.length} link(s) proposed` : `No missing links found (${res.data?.notes ?? 0} notes).`);
         for (const c of cands) this.renderProposal(scanResults, c);
-      } catch (e: any) { scanStatus.setText("Scan failed: " + (e?.message || e)); }
+      } catch (e) { scanStatus.setText("Scan failed: " + errMsg(e)); }
       finally { scanBtn.disabled = false; }
     };
 
@@ -277,20 +289,20 @@ export class QvacView extends ItemView {
         list.empty();
         if (!hits.length) { list.createDiv({ cls: "qvac-empty", text: "No related notes." }); return; }
         for (const h of hits) this.renderRelatedRow(list, file.path, h, linked.has(h.source));
-      } catch (e: any) { list.empty(); list.setText("Unavailable: " + (e?.message || e)); }
+      } catch (e) { list.empty(); list.setText("Unavailable: " + errMsg(e)); }
     } else {
       wrap.createDiv({ cls: "qvac-empty", text: "Open a note to see + link related notes." });
     }
   }
   // a vault-scan proposal: A <-> B + reason; "Link" inserts [[B]] into A.
-  private renderProposal(container: HTMLElement, c: any) {
+  private renderProposal(container: HTMLElement, c: Candidate) {
     const card = container.createDiv({ cls: "qvac-proposal" });
     const top = card.createDiv({ cls: "qvac-proposal-top" });
     const a = top.createEl("a", { cls: "qvac-result-title", text: c.a.replace(/\.md$/, ""), href: "#" });
-    a.onclick = (e) => { e.preventDefault(); this.plugin.openSource(c.a); };
+    a.onclick = (e) => { e.preventDefault(); void this.plugin.openSource(c.a); };
     top.createSpan({ cls: "qvac-proposal-arrow", text: "↔" });
     const b = top.createEl("a", { cls: "qvac-result-title", text: c.b.replace(/\.md$/, ""), href: "#" });
-    b.onclick = (e) => { e.preventDefault(); this.plugin.openSource(c.b); };
+    b.onclick = (e) => { e.preventDefault(); void this.plugin.openSource(c.b); };
     card.createDiv({ cls: "qvac-proposal-reason", text: c.reason });
     const acts = card.createDiv({ cls: "qvac-proposal-acts" });
     const linkBtn = acts.createEl("button", { cls: "qvac-pill on", text: "Link" });
@@ -298,13 +310,13 @@ export class QvacView extends ItemView {
     acts.createEl("button", { cls: "qvac-pill", text: "Skip" }).onclick = () => card.remove();
   }
   // a related-note row for the active note: open, score, and "+ Link" (or "✓ linked").
-  private renderRelatedRow(container: HTMLElement, fromPath: string, h: any, linked: boolean) {
+  private renderRelatedRow(container: HTMLElement, fromPath: string, h: Hit, linked: boolean) {
     const card = container.createDiv({ cls: "qvac-result" });
     const top = card.createDiv({ cls: "qvac-result-top" });
     const a = top.createEl("a", { cls: "qvac-result-title", text: h.source.replace(/\.md$/, ""), href: "#" });
-    a.onclick = (e) => { e.preventDefault(); this.plugin.openSource(h.source); };
+    a.onclick = (e) => { e.preventDefault(); void this.plugin.openSource(h.source); };
     const right = top.createDiv({ cls: "qvac-result-right" });
-    right.createSpan({ cls: "qvac-result-score", text: Math.round((h.score || 0) * 100) + "%" });
+    right.createSpan({ cls: "qvac-result-score", text: Math.round((h.score ?? 0) * 100) + "%" });
     if (linked) right.createSpan({ cls: "qvac-linked", text: "✓ linked" });
     else {
       const lb = right.createEl("button", { cls: "qvac-pill", text: "+ Link" });
@@ -323,11 +335,11 @@ export class QvacView extends ItemView {
     const bar = barWrap.createDiv({ cls: "qvac-bar-fill" });
     const sub = wrap.createDiv({ cls: "qvac-train-sub" });
 
-    const adaptersHead = wrap.createDiv({ cls: "qvac-train-subhead", text: "Your vault models" });
+    wrap.createDiv({ cls: "qvac-train-subhead", text: "Your vault models" });
     const adaptersEl = wrap.createDiv({ cls: "qvac-adapters" });
     const refreshAdapters = async () => {
       adaptersEl.empty();
-      let adapters: any[] = [];
+      let adapters: Adapter[] = [];
       try { adapters = await this.plugin.trainList(); } catch { /* */ }
       if (!adapters.length) { adaptersEl.createDiv({ cls: "qvac-empty", text: "No vault models yet." }); return; }
       for (const a of adapters) {
@@ -336,27 +348,27 @@ export class QvacView extends ItemView {
         card.createDiv({ cls: "qvac-adapter-name", text: `${a.baseKey} · ${a.sizeMB} MB${active ? " · active" : ""}` });
         const acts = card.createDiv({ cls: "qvac-adapter-acts" });
         const useBtn = acts.createEl("button", { text: active ? "Active" : "Use" }); useBtn.disabled = active;
-        useBtn.onclick = async () => { await this.plugin.setVoiceAdapter(a.file); refreshAdapters(); new Notice("QVAC: vault model enabled in chat."); };
-        acts.createEl("button", { text: "Delete" }).onclick = async () => { await this.plugin.trainDelete(a.file); if (active) await this.plugin.setVoiceAdapter(null); refreshAdapters(); };
+        useBtn.onclick = async () => { await this.plugin.setVoiceAdapter(a.file); void refreshAdapters(); new Notice("QVAC: vault model enabled in chat."); };
+        acts.createEl("button", { text: "Delete" }).onclick = async () => { await this.plugin.trainDelete(a.file); if (active) await this.plugin.setVoiceAdapter(null); void refreshAdapters(); };
       }
     };
-    refreshAdapters();
+    void refreshAdapters();
 
     startBtn.onclick = async () => {
       startBtn.disabled = true; statusEl.setText("Building dataset from your notes…"); barWrap.removeClass("hidden");
       try {
-        const res = await this.plugin.trainStart({ epochs: 1 }, (f: any) => {
+        const res = await this.plugin.trainStart({ epochs: 1 }, (f: TrainFrame) => {
           if (f.type === "train.dataset") statusEl.setText(`Training on ${f.proseNotes} notes · chat is paused`);
           else if (f.type === "train.progress") {
-            const pct = f.totalBatches ? Math.round((f.step / f.totalBatches) * 100) : 0;
-            bar.style.width = pct + "%";
+            const pct = f.totalBatches ? Math.round(((f.step ?? 0) / f.totalBatches) * 100) : 0;
+            bar.setCssStyles({ width: pct + "%" });
             sub.setText(`epoch ${f.epoch} · step ${f.step}/${f.totalBatches} · loss ${f.loss ?? "…"} · eta ${f.etaSec}s`);
           }
         });
         if (res.ok && res.data?.status === "COMPLETED") { statusEl.setText(`Done. Trained a vault model (${res.data.adapterMB} MB) in ${res.data.elapsedSec}s.`); new Notice("QVAC: vault model trained. Enable it in Chat."); }
-        else statusEl.setText("Training did not complete: " + (res.error || res.data?.status || "unknown"));
-      } catch (e: any) { statusEl.setText("Training failed: " + (e?.message || e)); }
-      finally { startBtn.disabled = false; barWrap.addClass("hidden"); bar.style.width = "0%"; sub.setText(""); refreshAdapters(); }
+        else statusEl.setText("Training did not complete: " + (res.error ?? res.data?.status ?? "unknown"));
+      } catch (e) { statusEl.setText("Training failed: " + errMsg(e)); }
+      finally { startBtn.disabled = false; barWrap.addClass("hidden"); bar.setCssStyles({ width: "0%" }); sub.setText(""); void refreshAdapters(); }
     };
   }
 }

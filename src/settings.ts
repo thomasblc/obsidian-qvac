@@ -32,8 +32,8 @@ export const DEFAULT_SETTINGS: QvacSettings = {
 };
 
 // Additive merge + version stamp. A renamed/removed key in a future version gets a migration step here.
-export function migrateSettings(raw: any): QvacSettings {
-  const s = Object.assign({}, DEFAULT_SETTINGS, raw || {});
+export function migrateSettings(raw: unknown): QvacSettings {
+  const s = Object.assign({}, DEFAULT_SETTINGS, (raw as Partial<QvacSettings>) || {});
   s.settingsVersion = DEFAULT_SETTINGS.settingsVersion;
   return s;
 }
@@ -44,7 +44,6 @@ export class QvacSettingTab extends PluginSettingTab {
   display() {
     const { containerEl } = this;
     containerEl.empty();
-    containerEl.createEl("h3", { text: "QVAC - local AI for your vault" });
 
     const statusSetting = new Setting(containerEl)
       .setName("Companion")
@@ -58,7 +57,7 @@ export class QvacSettingTab extends PluginSettingTab {
       statusEl.toggleClass("is-disconnected", !h);
     };
     statusSetting.addButton((b) => b.setButtonText("Recheck").onClick(refresh));
-    refresh();
+    void refresh();
 
     new Setting(containerEl)
       .setName("Chat model")

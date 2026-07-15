@@ -13,8 +13,8 @@ export function configDir(): string {
 
 export function readDaemonInfo(): DaemonInfo | null {
   try {
-    const j = JSON.parse(readFileSync(join(configDir(), "daemon.json"), "utf8"));
-    if (j && typeof j.port === "number" && typeof j.token === "string") return { port: j.port, token: j.token, pid: j.pid };
+    const j = JSON.parse(readFileSync(join(configDir(), "daemon.json"), "utf8")) as Partial<DaemonInfo>;
+    if (typeof j.port === "number" && typeof j.token === "string") return { port: j.port, token: j.token, pid: j.pid };
   } catch { /* */ }
   return null;
 }

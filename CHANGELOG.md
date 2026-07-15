@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.2.2 - 2026-07 - Review fixes
+
+Clears the Obsidian automated-review findings. No behavior change.
+
+- `minAppVersion` bumped to `1.7.2` (the plugin uses `Workspace.revealLeaf`, async since 1.7.2).
+- All UI styling goes through `setCssStyles` / CSS classes instead of inline `element.style`.
+- Settings no longer create a raw `<h3>` heading.
+- The companion RPC layer is fully typed (a small `lib/rpc.ts`), removing the `any`-driven
+  type-safety warnings; unused code and unnecessary type assertions removed.
+- Added an ESLint setup with `eslint-plugin-obsidianmd` (`npm run lint`) so future changes stay clean.
+
 ## 0.2.1 - 2026-07 - Submission prep
 
 Repo restructured for the Obsidian community directory (plugin at the repo root, companion in
