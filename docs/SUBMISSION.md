@@ -11,26 +11,28 @@ assets as **separate binary files (not zipped)**: `main.js`, `manifest.json`, `s
 
 Release `0.2.0` already has all three attached.
 
-## Community-directory submission
+## Community-directory submission (NEW web flow, 2026)
 
-1. Repo is public: `thomasblc/obsidian-qvac` (MIT). `manifest.json` is at the root. Done.
-2. GitHub Release with tag = the version (no leading `v`), the three assets attached. Done for `0.2.0`.
-3. Open a PR to [`obsidianmd/obsidian-releases`](https://github.com/obsidianmd/obsidian-releases)
-   adding this entry to `community-plugins.json` (append at the end of the array):
+Obsidian **no longer accepts a PR to `obsidian-releases`** (PRs are disabled on that repo). Submission
+is a web form. Prereqs already met: public repo `thomasblc/obsidian-qvac` (MIT), `README.md` + `LICENSE`
++ `manifest.json` at the ROOT, and a GitHub release whose tag == the manifest `version` with `main.js` +
+`manifest.json` + `styles.css` attached (release `0.2.1`).
 
-```json
-{
-  "id": "qvac-local-ai",
-  "name": "QVAC",
-  "author": "Thomas Blanc",
-  "description": "Chat with your vault, fully local. Semantic search and cited answers via a local QVAC companion.",
-  "repo": "thomasblc/obsidian-qvac"
-}
-```
+Steps (Thomas, needs his Obsidian + GitHub accounts):
+1. Go to https://community.obsidian.md and sign in with the Obsidian account.
+2. Link the GitHub account (proves repo ownership).
+3. Sidebar -> **Plugins** -> **New plugin**.
+4. Enter the repo URL: `https://github.com/thomasblc/obsidian-qvac`.
+5. Review + agree to the Developer policies, confirm ongoing support, **Submit**.
 
-Review takes ~1-7 days (sometimes weeks); Obsidian runs automated security scans on every submitted
-version. Expect a question about the local companion + subprocess. The README disclosures cover it,
-but the reviewer must be able to actually run the companion (see below).
+The directory reads `manifest.json` at HEAD of the default branch (ours is at root on `main`), then runs
+an automated review; feedback shows in the community.obsidian.md dashboard. Address it by pushing a new
+release with an incremented version. `id` (`qvac-local-ai`) is unique and free of "obsidian". Expect a
+review question about the local companion + subprocess. The README disclosures cover it, but the reviewer
+must be able to actually run the companion (see below).
+
+Once approved, the entry is added to `community-plugins.json` automatically (that is the "live" signal the
+local watcher `scripts/watch_obsidian_pr.py` polls, in the QVAC-agent repo).
 
 ## The one thing that gates the review: a public companion
 The plugin does nothing without the companion daemon. For the review to pass, a reviewer needs a
@@ -46,9 +48,9 @@ Users install [BRAT](https://github.com/TfTHacker/obsidian42-brat), add `thomasb
 and get the release. No directory approval needed. Fastest way to get real users on it.
 
 ## Still on Thomas (identity-gated)
-- The `obsidian-releases` PR (his GitHub identity).
+- The community.obsidian.md submission (his Obsidian + GitHub accounts) - see the steps above.
 - Apple Developer ID to notarize the `.dmg` (ad-hoc signing works for local/BRAT, but Gatekeeper
-  warns on other machines without notarization).
+  warns on other machines without notarization). Not required if the companion ships via `npx`.
 
 ## Nice-to-have before submitting (optional)
 - Replace the few JS-assigned inline styles (`src/settings.ts`, `src/qvac-view.ts`) with CSS classes
