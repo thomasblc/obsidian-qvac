@@ -1,16 +1,33 @@
 {
   "name": "qvac-obsidian-companion",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "QVAC for Obsidian companion daemon: local chat + RAG + OCR + LoRA over an Obsidian vault, via @qvac/sdk. Nothing leaves the machine.",
   "type": "module",
   "license": "MIT",
   "author": "Thomas Blanc",
   "homepage": "https://github.com/thomasblc/obsidian-qvac",
-  "repository": { "type": "git", "url": "https://github.com/thomasblc/obsidian-qvac.git", "directory": "companion" },
-  "keywords": ["obsidian", "qvac", "local-ai", "rag", "llm", "on-device"],
-  "engines": { "node": ">=20" },
-  "bin": { "qvac-obsidian-companion": "server.js" },
-  "files": ["*.js"],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/thomasblc/obsidian-qvac.git",
+    "directory": "companion"
+  },
+  "keywords": [
+    "obsidian",
+    "qvac",
+    "local-ai",
+    "rag",
+    "llm",
+    "on-device"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "bin": {
+    "qvac-obsidian-companion": "server.js"
+  },
+  "files": [
+    "*.js"
+  ],
   "scripts": {
     "start": "node server.js"
   },
