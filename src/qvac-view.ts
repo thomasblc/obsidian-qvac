@@ -19,6 +19,7 @@ export class QvacView extends ItemView {
   private bodyEl: HTMLElement;
   private statusDot: HTMLElement;
   private statusText: HTMLElement;
+  private connected = false;
 
   // chat
   private history: ChatMessage[] = [];
@@ -58,40 +59,58 @@ export class QvacView extends ItemView {
     const status = header.createDiv({ cls: "qvac-conn" });
     this.statusDot = status.createSpan({ cls: "qvac-dot" });
     this.statusText = status.createSpan({ cls: "qvac-conn-text", text: "…" });
-    void this.refreshStatus();
 
-    // tab bar
     this.tabsEl = root.createDiv({ cls: "qvac-tabs" });
-    const tabs: { id: QvacTab; label: string; icon: string }[] = [
-      { id: "chat", label: "Chat", icon: "message-square" },
-      { id: "search", label: "AI Search", icon: "search" },
-      { id: "connect", label: "Connect", icon: "git-fork" },
-      { id: "train", label: "Train", icon: "graduation-cap" },
+    this.bodyEl = root.createDiv({ cls: "qvac-body" });
+    this.buildTabBar();
+    void this.refreshStatus(); // sets connected, then renders the body
+
+    // refresh Connect's per-note section on note switch (debounced; file-open fires twice)
+    this.registerEvent(this.app.workspace.on("file-open", debounce(() => { if (this.tab === "connect" && this.connected) void this.renderConnect(); }, 400, true)));
+    return Promise.resolve();
+  }
+  onClose(): Promise<void> { return Promise.resolve(); }
+
+  // The tabs the user has enabled, in fixed order.
+  private enabledTabs(): { id: QvacTab; label: string; icon: string }[] {
+    const s = this.plugin.settings;
+    const all: { id: QvacTab; label: string; icon: string; on: boolean }[] = [
+      { id: "chat", label: "Chat", icon: "message-square", on: s.tabChat },
+      { id: "search", label: "AI Search", icon: "search", on: s.tabSearch },
+      { id: "connect", label: "Connect", icon: "git-fork", on: s.tabConnect },
+      { id: "train", label: "Train", icon: "graduation-cap", on: s.tabTrain },
     ];
+    return all.filter((t) => t.on).map(({ id, label, icon }) => ({ id, label, icon }));
+  }
+
+  private buildTabBar() {
+    this.tabsEl.empty();
+    const tabs = this.enabledTabs();
+    if (tabs.length && !tabs.some((t) => t.id === this.tab)) this.tab = tabs[0].id;
     for (const t of tabs) {
       const b = this.tabsEl.createDiv({ cls: "qvac-tab" });
       const ic = b.createSpan({ cls: "qvac-tab-ic" }); setIcon(ic, t.icon);
       b.createSpan({ text: t.label });
       b.dataset.tab = t.id;
+      b.toggleClass("active", t.id === this.tab);
       b.onclick = () => this.setTab(t.id);
     }
-
-    this.bodyEl = root.createDiv({ cls: "qvac-body" });
-    this.setTab(this.tab);
-
-    // refresh Connect's per-note section on note switch (debounced; file-open fires twice)
-    this.registerEvent(this.app.workspace.on("file-open", debounce(() => { if (this.tab === "connect") void this.renderConnect(); }, 400, true)));
-    return Promise.resolve();
+    this.renderBody();
   }
-  onClose(): Promise<void> { return Promise.resolve(); }
+
+  // Called by the settings tab when tab-visibility toggles change.
+  rebuild() { this.buildTabBar(); }
 
   async refreshStatus() {
     let h: Health | null = null;
     try { h = await this.plugin.checkHealth(); } catch { h = null; }
     const on = !!h;
+    const changed = on !== this.connected;
+    this.connected = on;
     this.statusDot?.toggleClass("on", on);
     this.statusDot?.toggleClass("off", !on);
     if (this.statusText) this.statusText.setText(h ? `connected · ${h.version}` : "companion offline");
+    if (changed) this.renderBody(); // offline card <-> real tab
   }
 
   setTab(tab: QvacTab) {
@@ -99,14 +118,34 @@ export class QvacView extends ItemView {
     for (const el of Array.from(this.tabsEl.children)) {
       if (el.instanceOf(HTMLElement)) el.toggleClass("active", el.dataset.tab === tab);
     }
+    this.renderBody();
+  }
+
+  private renderBody() {
     this.bodyEl.empty();
+    if (!this.enabledTabs().length) { this.bodyEl.createDiv({ cls: "qvac-empty", text: "Enable at least one tab in the QVAC settings." }); return; }
+    // Nothing works without the companion; guide the user instead of failing on the first click.
+    if (!this.connected) { this.renderOffline(); return; }
     // Until the models are downloaded, every tab shows the one-time Setup panel (no silent multi-GB
     // download inside a chat/index timeout).
     if (!this.plugin.isProvisioned()) { this.renderSetup(); return; }
-    if (tab === "chat") this.renderChat();
-    else if (tab === "search") this.renderSearch();
-    else if (tab === "connect") void this.renderConnect();
-    else if (tab === "train") void this.renderTrain();
+    if (this.tab === "chat") this.renderChat();
+    else if (this.tab === "search") this.renderSearch();
+    else if (this.tab === "connect") void this.renderConnect();
+    else if (this.tab === "train") void this.renderTrain();
+  }
+
+  private renderOffline() {
+    const wrap = this.bodyEl.createDiv({ cls: "qvac-setup" });
+    wrap.createDiv({ cls: "qvac-train-title", text: "Companion offline" });
+    wrap.createDiv({ cls: "qvac-train-desc", text: "The AI runs in a local companion process that this plugin talks to over 127.0.0.1. It is not running yet. Start it, then recheck." });
+    const steps = wrap.createEl("ol", { cls: "qvac-offline-steps" });
+    steps.createEl("li").setText("Open a terminal.");
+    const li = steps.createEl("li");
+    li.setText("Run: ");
+    li.createEl("code", { text: "npx qvac-obsidian-companion" });
+    steps.createEl("li").setText("Leave it running, then click Recheck below.");
+    wrap.createEl("button", { cls: "qvac-btn-primary", text: "Recheck" }).onclick = () => { void this.refreshStatus(); };
   }
 
   // ---------- SETUP (first-run provisioning) ----------

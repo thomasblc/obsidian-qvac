@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.5 - 2026-07 - Tabs, offline guidance, graph colors
+
+- **Hide tabs you do not use.** Settings now has toggles for Chat / AI Search / Connect / Train
+  (turn Train off if you never fine-tune). The panel updates live.
+- **Clear offline state.** When the companion is not running, the panel explains how to start it
+  (`npx qvac-obsidian-companion`) with a Recheck button, instead of failing on the first click.
+- **Color your graph.** New command and settings button "Color graph by folder" that groups the
+  Obsidian graph nodes by folder (with the QVAC accent), so clusters pop.
+
 ## 0.2.4 - 2026-07 - README title
 
 - README title now matches the plugin name ("Local AI for your vault").

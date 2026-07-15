@@ -10,6 +10,11 @@ export interface QvacSettings {
   voiceAdapter: string | null; // active adapter file
   ocrImages: boolean;     // also index the text inside images (OCR), opt-in
   provisioned: boolean;   // the models have been downloaded (gates auto-index + the Setup panel)
+  // Which tabs to show in the panel. Off Train, for example, if you never fine-tune.
+  tabChat: boolean;
+  tabSearch: boolean;
+  tabConnect: boolean;
+  tabTrain: boolean;
 }
 
 // Chat model choices exposed in the picker, with rough resident RAM so users pick for their machine.
@@ -21,7 +26,7 @@ export const CHAT_MODELS: { key: string; label: string }[] = [
 ];
 
 export const DEFAULT_SETTINGS: QvacSettings = {
-  settingsVersion: 2,
+  settingsVersion: 3,
   indexOnStartup: true,
   chatBaseKey: "4b",
   excludeFolders: "",
@@ -29,6 +34,10 @@ export const DEFAULT_SETTINGS: QvacSettings = {
   voiceAdapter: null,
   ocrImages: false,
   provisioned: false,
+  tabChat: true,
+  tabSearch: true,
+  tabConnect: true,
+  tabTrain: true,
 };
 
 // Additive merge + version stamp. A renamed/removed key in a future version gets a migration step here.
@@ -86,5 +95,26 @@ export class QvacSettingTab extends PluginSettingTab {
       .setName("Reindex vault")
       .setDesc("Force a full incremental sync now.")
       .addButton((b) => b.setButtonText("Reindex").onClick(() => this.plugin.indexVault(true)));
+
+    new Setting(containerEl).setName("Tabs").setHeading();
+
+    const tabToggle = (name: string, desc: string, key: "tabChat" | "tabSearch" | "tabConnect" | "tabTrain") =>
+      new Setting(containerEl)
+        .setName(name)
+        .setDesc(desc)
+        .addToggle((t) => t.setValue(this.plugin.settings[key]).onChange(async (v) => {
+          this.plugin.settings[key] = v;
+          await this.plugin.saveSettings();
+          this.plugin.refreshOpenViews();
+        }));
+    tabToggle("Show Chat", "Ask questions grounded in your notes.", "tabChat");
+    tabToggle("Show AI Search", "Find notes by meaning.", "tabSearch");
+    tabToggle("Show Connect", "Find and write the missing links between notes.", "tabConnect");
+    tabToggle("Show Train", "Fine-tune a model on your vault. Turn off if you never fine-tune.", "tabTrain");
+
+    new Setting(containerEl)
+      .setName("Style the graph")
+      .setDesc("Color the Obsidian graph nodes by folder. Reopen the Graph view after applying.")
+      .addButton((b) => b.setButtonText("Color by folder").onClick(() => { void this.plugin.colorGraph(); }));
   }
 }

@@ -46,6 +46,7 @@ export default class QvacPlugin extends Plugin {
     this.addCommand({ id: "open-train", name: "Train a model on your vault", callback: () => { void this.activateView("train"); } });
     this.addCommand({ id: "index-vault", name: "Index vault (incremental)", callback: () => { void this.indexVault(false); } });
     this.addCommand({ id: "reindex-vault", name: "Reindex vault (full)", callback: () => { void this.indexVault(true); } });
+    this.addCommand({ id: "color-graph", name: "Color graph by folder", callback: () => { void this.colorGraph(); } });
     this.addSettingTab(new QvacSettingTab(this.app, this));
 
     // Inline writing commands (selection -> review modal -> apply).
@@ -269,5 +270,39 @@ export default class QvacPlugin extends Plugin {
       await workspace.revealLeaf(leaf);
       if (tab && leaf.view instanceof QvacView) leaf.view.setTab(tab);
     }
+  }
+
+  // Re-render open QVAC panels (used when tab-visibility settings change).
+  refreshOpenViews() {
+    for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE_QVAC)) {
+      if (leaf.view instanceof QvacView) leaf.view.rebuild();
+    }
+  }
+
+  // Color the Obsidian graph nodes by top-level folder (plus a group for #moc hubs), using the
+  // QVAC accent for the first cluster. Writes .obsidian/graph.json; Obsidian applies it when the
+  // Graph view is (re)opened.
+  async colorGraph() {
+    const palette = [0x16E3C1, 0xA855F7, 0x3B82F6, 0xF5A623, 0x22C55E, 0xEC4899, 0xEAB308];
+    const folders = new Set<string>();
+    for (const f of this.app.vault.getMarkdownFiles()) {
+      const i = f.path.indexOf("/");
+      if (i > 0) folders.add(f.path.slice(0, i));
+    }
+    const groups: { query: string; color: { a: number; rgb: number } }[] = [
+      { query: "tag:#moc", color: { a: 1, rgb: 0xFF7043 } },
+    ];
+    let n = 0;
+    for (const folder of Array.from(folders).sort()) {
+      groups.push({ query: `path:${folder}/`, color: { a: 1, rgb: palette[n % palette.length] } });
+      n++;
+    }
+    const path = ".obsidian/graph.json";
+    let cfg: Record<string, unknown> = {};
+    try { cfg = JSON.parse(await this.app.vault.adapter.read(path)) as Record<string, unknown>; } catch { /* no existing config */ }
+    cfg.colorGroups = groups;
+    cfg["collapse-color-groups"] = false;
+    await this.app.vault.adapter.write(path, JSON.stringify(cfg, null, 2));
+    new Notice("QVAC: colored the graph by folder. Reopen the Graph view to see it.");
   }
 }
