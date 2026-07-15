@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.6 - 2026-07 - Polish
+
+- No more "offline" card flashing on open when the companion is actually running (neutral
+  "Connecting…" state until the first health check resolves).
+- "Color graph by folder" now handles folder names with spaces.
+
 ## 0.2.5 - 2026-07 - Tabs, offline guidance, graph colors
 
 - **Hide tabs you do not use.** Settings now has toggles for Chat / AI Search / Connect / Train

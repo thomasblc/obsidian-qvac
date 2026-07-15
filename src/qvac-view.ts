@@ -20,6 +20,7 @@ export class QvacView extends ItemView {
   private statusDot: HTMLElement;
   private statusText: HTMLElement;
   private connected = false;
+  private statusChecked = false; // has the first health check resolved yet
 
   // chat
   private history: ChatMessage[] = [];
@@ -106,11 +107,13 @@ export class QvacView extends ItemView {
     try { h = await this.plugin.checkHealth(); } catch { h = null; }
     const on = !!h;
     const changed = on !== this.connected;
+    const firstCheck = !this.statusChecked;
     this.connected = on;
+    this.statusChecked = true;
     this.statusDot?.toggleClass("on", on);
     this.statusDot?.toggleClass("off", !on);
     if (this.statusText) this.statusText.setText(h ? `connected · ${h.version}` : "companion offline");
-    if (changed) this.renderBody(); // offline card <-> real tab
+    if (changed || firstCheck) this.renderBody(); // "checking" -> offline card <-> real tab
   }
 
   setTab(tab: QvacTab) {
@@ -124,6 +127,9 @@ export class QvacView extends ItemView {
   private renderBody() {
     this.bodyEl.empty();
     if (!this.enabledTabs().length) { this.bodyEl.createDiv({ cls: "qvac-empty", text: "Enable at least one tab in the QVAC settings." }); return; }
+    // Neutral state until the first health check resolves, so a healthy setup never flashes the
+    // "offline" card on open.
+    if (!this.statusChecked) { this.bodyEl.createDiv({ cls: "qvac-empty", text: "Connecting to companion…" }); return; }
     // Nothing works without the companion; guide the user instead of failing on the first click.
     if (!this.connected) { this.renderOffline(); return; }
     // Until the models are downloaded, every tab shows the one-time Setup panel (no silent multi-GB

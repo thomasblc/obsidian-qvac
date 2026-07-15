@@ -294,7 +294,7 @@ export default class QvacPlugin extends Plugin {
     ];
     let n = 0;
     for (const folder of Array.from(folders).sort()) {
-      groups.push({ query: `path:${folder}/`, color: { a: 1, rgb: palette[n % palette.length] } });
+      groups.push({ query: `path:"${folder}/"`, color: { a: 1, rgb: palette[n % palette.length] } });
       n++;
     }
     const path = ".obsidian/graph.json";
