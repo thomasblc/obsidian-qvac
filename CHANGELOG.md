@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.2.3 - 2026-07 - Review polish
+
+Pushes the automated review toward a clean report. No behavior change.
+
+- Renamed to **Local AI for your vault** (clearer, and no longer all-caps).
+- Node built-ins (`fs`/`os`/`path`/`crypto`) go through a small typed shim (`lib/node.ts`),
+  removing the remaining `no-unsafe-*` warnings.
+- Timers use `window.setTimeout`/`clearTimeout` for popout-window compatibility.
+- Releases are now built in CI with a GitHub build-provenance attestation on the assets.
+
 ## 0.2.2 - 2026-07 - Review fixes
 
 Clears the Obsidian automated-review findings. No behavior change.

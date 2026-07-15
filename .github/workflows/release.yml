@@ -1,0 +1,47 @@
+name: Release
+
+# Build the plugin in CI and publish a GitHub release whose assets carry a build-provenance
+# attestation (so users can cryptographically verify main.js/styles.css were built from source).
+# Trigger: push a tag equal to the manifest version, e.g. `git tag 0.2.3 && git push origin 0.2.3`.
+
+on:
+  push:
+    tags:
+      - "*.*.*"
+
+permissions:
+  contents: write        # create the release
+  id-token: write        # OIDC token for attestation
+  attestations: write    # write the provenance attestation
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - run: npm ci
+
+      - run: npm run build
+
+      - name: Attest build provenance for the release assets
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            main.js
+            manifest.json
+            styles.css
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            main.js manifest.json styles.css \
+            --title "${GITHUB_REF_NAME}" \
+            --notes "Automated release. Assets carry a GitHub build-provenance attestation."

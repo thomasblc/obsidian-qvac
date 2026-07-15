@@ -17,6 +17,8 @@ const flush = () => new Promise((r) => setTimeout(r, 0)); // drain all pending m
 
 test("0.5: an old socket's onclose does not reject the new socket's in-flight rpc", async () => {
   (globalThis as any).WebSocket = FakeWS as any;
+  // ws.ts uses window.setTimeout (popout-window safe); in Node, point window at the global.
+  (globalThis as any).window = globalThis;
   FakeWS.instances = [];
   const { WsClient } = await import("../src/lib/ws.ts");
   const c = new WsClient("ws://x");

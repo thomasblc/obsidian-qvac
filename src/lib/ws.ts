@@ -11,7 +11,7 @@ interface Pending {
   onFrame?: (f: Frame) => void;
   resolve: (r: RpcResult) => void;
   reject: (e: Error) => void;
-  timer: ReturnType<typeof setTimeout>;
+  timer: number;
   gen: number; // the socket generation this rpc was sent on
 }
 
@@ -75,18 +75,18 @@ export class WsClient {
     const p = this.pending.get(m.id);
     if (!p) return;
     if (m.ok === undefined) { p.frames.push(m); p.onFrame?.(m); return; } // streaming frame
-    clearTimeout(p.timer); this.pending.delete(m.id);
+    window.clearTimeout(p.timer); this.pending.delete(m.id);
     p.resolve({ ok: m.ok, data: m.data, error: m.error, frames: p.frames });
   }
 
   private failGen(gen: number, reason: string) {
     for (const [id, p] of this.pending) {
       if (p.gen !== gen) continue;
-      clearTimeout(p.timer); this.pending.delete(id); p.reject(new Error(reason));
+      window.clearTimeout(p.timer); this.pending.delete(id); p.reject(new Error(reason));
     }
   }
   private failAll(reason: string) {
-    for (const p of this.pending.values()) { clearTimeout(p.timer); p.reject(new Error(reason)); }
+    for (const p of this.pending.values()) { window.clearTimeout(p.timer); p.reject(new Error(reason)); }
     this.pending.clear();
   }
 
@@ -101,10 +101,10 @@ export class WsClient {
     const onFrame: ((f: Frame) => void) | undefined = opts.onFrame;
     // The pending map is untyped (RpcResult<unknown>); cast the final result to the caller's T.
     const result = await new Promise<RpcResult>((resolve, reject) => {
-      const timer = setTimeout(() => { this.pending.delete(id); reject(new Error(type + " timed out")); }, opts.timeoutMs ?? 120000);
+      const timer = window.setTimeout(() => { this.pending.delete(id); reject(new Error(type + " timed out")); }, opts.timeoutMs ?? 120000);
       this.pending.set(id, { frames: [], onFrame, resolve, reject, timer, gen });
       try { this.ws?.send(JSON.stringify({ id, type, ...payload })); }
-      catch (e) { clearTimeout(timer); this.pending.delete(id); reject(asError(e)); }
+      catch (e) { window.clearTimeout(timer); this.pending.delete(id); reject(asError(e)); }
     });
     return result as RpcResult<T>;
   }

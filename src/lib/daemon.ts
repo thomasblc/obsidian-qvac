@@ -1,14 +1,12 @@
 // Companion daemon discovery (desktop-only: Node fs/os). The daemon writes ~/.qvac-obsidian/daemon.json
 // {port, token, pid}; the plugin reads it, health-checks, and connects. If it is down the plugin shows
 // an "install/start QVAC" state and (P5) can spawn the bundled companion. A single daemon serves all vaults.
-import { readFileSync } from "fs";
-import { join } from "path";
-import { homedir } from "os";
+import { readFileSync, homedir, join, envVar } from "./node";
 
 export interface DaemonInfo { port: number; token: string; pid?: number; }
 
 export function configDir(): string {
-  return process.env.QVAC_OBSIDIAN_CONFIG_DIR || join(homedir(), ".qvac-obsidian");
+  return envVar("QVAC_OBSIDIAN_CONFIG_DIR") ?? join(homedir(), ".qvac-obsidian");
 }
 
 export function readDaemonInfo(): DaemonInfo | null {
