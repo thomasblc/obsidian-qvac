@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.7 - 2026-07 - Settings gear + bring your own model
+
+- **Settings gear in the panel header** opens the plugin settings directly (no more hunting).
+- **Bring your own chat model.** New setting "Custom chat model": point it at a local GGUF path or
+  a model URL and the companion loads that instead of downloading the default (skips the big chat
+  download; the small embeddings model still downloads). Voice/LoRA is disabled for a custom base.
+  Requires companion `qvac-obsidian-companion` >= 0.2.7.
+
 ## 0.2.6 - 2026-07 - Polish
 
 - No more "offline" card flashing on open when the companion is actually running (neutral

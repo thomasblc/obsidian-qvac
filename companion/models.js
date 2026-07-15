@@ -79,26 +79,30 @@ export class ModelManager {
   // load) is what stops a second chat from reloading/unloading the slot mid-stream.
   // Ensure the requested (base, lora, tools, remote) LLM slot is loaded. NOT locked itself -
   // callers run it inside _serialize so it never races another worker RPC.
-  async _loadLLMUnlocked({ baseKey = "1.7b", lora = null, reasoningBudget = 0, tools = false } = {}) {
+  async _loadLLMUnlocked({ baseKey = "1.7b", lora = null, reasoningBudget = 0, tools = false, modelSrc = null } = {}) {
     // tools + remote are load-time, so both are part of the slot identity (normal local chat
     // stays tools-free + local). When a remote is connected, the LLM runs on that machine.
+    // modelSrc (a user-provided GGUF path/URL) overrides the registry base; a custom base has no
+    // matching LoRA, so voice is ignored for it. Slot identity keys on the resolved source.
     const remote = this.getRemote();
-    if (!(this.llm && this.llm.baseKey === baseKey && (this.llm.lora || null) === (lora || null) && !!this.llm.tools === !!tools && (this.llm.remote || null) === (remote || null))) {
+    const src = modelSrc || BASES[baseKey];
+    if (!src) throw new Error(`unknown base ${baseKey}`);
+    const effLora = modelSrc ? null : lora;
+    const slotKey = modelSrc ? `custom:${modelSrc}` : baseKey;
+    if (!(this.llm && this.llm.baseKey === slotKey && (this.llm.lora || null) === (effLora || null) && !!this.llm.tools === !!tools && (this.llm.remote || null) === (remote || null))) {
       if (this.llm) {
         try { await unloadModel({ modelId: this.llm.modelId, clearStorage: false }); } catch { /* */ }
         this.llm = null;
       }
-      const src = BASES[baseKey];
-      if (!src) throw new Error(`unknown base ${baseKey}`);
       const modelConfig = { device: "gpu", ctx_size: this.ctxSize, reasoning_budget: reasoningBudget };
-      if (lora) modelConfig.lora = lora;
+      if (effLora) modelConfig.lora = effLora;
       if (tools) { modelConfig.tools = true; modelConfig.toolsMode = "dynamic"; }
       const opts = { modelSrc: src, modelType: "llm", modelConfig };
       // fallbackToLocal:false so a connected-but-unreachable remote errors honestly
       // (instead of silently running local and pretending it is remote).
       if (remote) opts.delegate = { providerPublicKey: remote, fallbackToLocal: false };
       const modelId = await loadModel(opts);
-      this.llm = { modelId, baseKey, lora: lora || null, tools: !!tools, remote: remote || null };
+      this.llm = { modelId, baseKey: slotKey, lora: effLora || null, tools: !!tools, remote: remote || null };
     }
     return this.llm.modelId;
   }
@@ -217,8 +221,8 @@ export class ModelManager {
 
   // Stream a completion. onToken(text) for content, onThink(text) for thinking deltas.
   // Returns { contentText, thinkingText, stats }.
-  async chat(history, { baseKey = "1.7b", lora = null, onToken, onThink, captureThinking = false, reasoningBudget = 0 } = {}) {
-    return this._withLLM({ baseKey, lora, reasoningBudget }, async (modelId) => {
+  async chat(history, { baseKey = "1.7b", lora = null, modelSrc = null, onToken, onThink, captureThinking = false, reasoningBudget = 0 } = {}) {
+    return this._withLLM({ baseKey, lora, modelSrc, reasoningBudget }, async (modelId) => {
       const run = completion({ modelId, history, stream: true, captureThinking });
       for await (const ev of run.events) {
         if (ev.type === "contentDelta" && onToken) onToken(ev.text);

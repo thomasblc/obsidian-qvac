@@ -93,14 +93,14 @@ export default class QvacPlugin extends Plugin {
   async chat(message: string, history: ChatMessage[], onFrame: (f: ChatFrame) => void) {
     const ws = await this.ensureWs();
     const voice = this.settings.voiceEnabled && !!this.settings.voiceAdapter;
-    return ws.rpc<ChatData, ChatFrame>("chat", { vaultId: this.vaultId, message, history, memory: true, voice, adapter: this.settings.voiceAdapter || null, baseKey: this.settings.chatBaseKey }, { onFrame, timeoutMs: 180000 });
+    return ws.rpc<ChatData, ChatFrame>("chat", { vaultId: this.vaultId, message, history, memory: true, voice, adapter: this.settings.voiceAdapter || null, baseKey: this.settings.chatBaseKey, modelSrc: this.settings.customModelSrc || undefined }, { onFrame, timeoutMs: 180000 });
   }
 
   // ---- first-run provisioning: download the models with visible progress (instead of a silent
   // multi-GB stall inside a timed rpc). Embeddings enable search + Connect in minutes; chat second.
   async provision(onFrame: (f: ProvisionFrame) => void) {
     const ws = await this.ensureWs();
-    return ws.rpc<unknown, ProvisionFrame>("provision", {}, { onFrame, timeoutMs: 60 * 60 * 1000 });
+    return ws.rpc<unknown, ProvisionFrame>("provision", { modelSrc: this.settings.customModelSrc || undefined }, { onFrame, timeoutMs: 60 * 60 * 1000 });
   }
   isProvisioned(): boolean { return this.settings.provisioned; }
   async markProvisioned() { this.settings.provisioned = true; await this.saveSettings(); }
@@ -114,7 +114,7 @@ export default class QvacPlugin extends Plugin {
   // ---- inline writing commands + related notes ----
   async complete(system: string, message: string, onFrame?: (f: CompleteFrame) => void) {
     const ws = await this.ensureWs();
-    return ws.rpc<CompleteData, CompleteFrame>("complete", { system, message }, { onFrame, timeoutMs: 120000 });
+    return ws.rpc<CompleteData, CompleteFrame>("complete", { system, message, modelSrc: this.settings.customModelSrc || undefined }, { onFrame, timeoutMs: 120000 });
   }
   async related(text: string, excludePath: string): Promise<Hit[]> {
     let ws: WsClient;

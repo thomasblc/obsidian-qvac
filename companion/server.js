@@ -34,6 +34,12 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const trainer = new Trainer(path.join(CONFIG_DIR, "training"), path.join(__dirname, "finetune.js"));
 let training = false; // a LoRA run holds the global ~/.qvac worker; chat/embed are paused during it
 const MODEL_OPS = new Set(["chat", "search", "embed-doc", "index", "complete", "related", "provision", "connect.scan"]);
+
+// A user-configured custom chat model (GGUF path or URL) from the plugin settings, if any.
+function customModelSrc(msg) {
+  return (typeof msg.modelSrc === "string" && msg.modelSrc.trim()) ? msg.modelSrc.trim() : null;
+}
+
 const indexes = new Map(); // vaultId -> ContextIndex
 function getIndex(vaultId) {
   const id = String(vaultId || "default");
@@ -153,8 +159,9 @@ const handlers = {
       { role: "system", content: String(msg.system || "You are a precise writing assistant. Output only the requested text, no preamble.") },
       { role: "user", content: String(msg.message || "") },
     ];
-    const r = await mm.chat(history, { baseKey: CHAT_BASE, reasoningBudget: 0, onToken: push ? (t) => push({ type: "complete.token", text: t }) : undefined });
-    return { contentText: r.contentText || "", model: CHAT_BASE };
+    const modelSrc = customModelSrc(msg);
+    const r = await mm.chat(history, { baseKey: CHAT_BASE, modelSrc, reasoningBudget: 0, onToken: push ? (t) => push({ type: "complete.token", text: t }) : undefined });
+    return { contentText: r.contentText || "", model: modelSrc ? "custom" : CHAT_BASE };
   },
 
   // Related-notes: embed the given text, return the top-K OTHER notes (excluding the active one).
@@ -261,22 +268,25 @@ const handlers = {
       ...trimHistory(msg.history),
       { role: "user", content: String(message || "") },
     ];
-    // Voice toggle: load the user's LoRA, FORCING its training base (a mismatch SIGSEGVs llama.cpp).
-    // Otherwise honor the user's chosen chat model (settings picker), falling back to the default.
-    let baseKey = (msg.baseKey && BASES[msg.baseKey]) ? msg.baseKey : CHAT_BASE, lora = null, model = baseKey;
-    if (msg.voice && msg.adapter) {
+    // A user-supplied GGUF (settings) overrides the registry base and disables voice (no matching
+    // LoRA). Otherwise: voice toggle loads the LoRA forcing its training base; else the picker.
+    const modelSrc = customModelSrc(msg);
+    let baseKey = (msg.baseKey && BASES[msg.baseKey]) ? msg.baseKey : CHAT_BASE, lora = null, model = modelSrc ? "custom" : baseKey;
+    if (!modelSrc && msg.voice && msg.adapter) {
       const a = trainer.listAdapters().find((x) => x.file === msg.adapter);
       if (a) { baseKey = a.baseKey; lora = a.abs; model = `${a.baseKey}+voice`; }
     }
-    const r = await mm.chat(history, { baseKey, lora, reasoningBudget: 0, onToken: push ? (t) => push({ type: "chat.token", text: t }) : undefined });
+    const r = await mm.chat(history, { baseKey, lora, modelSrc, reasoningBudget: 0, onToken: push ? (t) => push({ type: "chat.token", text: t }) : undefined });
     return { contentText: r.contentText || "", hits, stats: r.stats || null, model };
   },
 
   async provision(msg, push) {
-    // Cache the chat + embed models (lazily; later phases defer TTS/OCR/LoRA-base).
-    await mm.download(BASES[CHAT_BASE], "llm", (p) => push({ type: "provision.progress", model: "chat", percentage: p?.percentage ?? null }));
+    // Cache the chat + embed models (lazily; later phases defer TTS/OCR/LoRA-base). With a custom
+    // chat model (a local GGUF already on disk), skip the big chat download; only embeddings is needed.
+    const modelSrc = customModelSrc(msg);
+    if (!modelSrc) await mm.download(BASES[CHAT_BASE], "llm", (p) => push({ type: "provision.progress", model: "chat", percentage: p?.percentage ?? null }));
     await mm.download(EMBEDDINGGEMMA_300M_Q4_0, "llamacpp-embedding", (p) => push({ type: "provision.progress", model: "embed", percentage: p?.percentage ?? null }));
-    return { provisioned: ["chat", "embed"] };
+    return { provisioned: modelSrc ? ["embed"] : ["chat", "embed"] };
   },
 };
 

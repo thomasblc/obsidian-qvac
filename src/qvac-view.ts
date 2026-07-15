@@ -60,6 +60,10 @@ export class QvacView extends ItemView {
     const status = header.createDiv({ cls: "qvac-conn" });
     this.statusDot = status.createSpan({ cls: "qvac-dot" });
     this.statusText = status.createSpan({ cls: "qvac-conn-text", text: "…" });
+    const gear = status.createSpan({ cls: "qvac-gear" });
+    setIcon(gear, "settings");
+    gear.setAttr("aria-label", "QVAC settings");
+    gear.onclick = () => this.openSettings();
 
     this.tabsEl = root.createDiv({ cls: "qvac-tabs" });
     this.bodyEl = root.createDiv({ cls: "qvac-body" });
@@ -101,6 +105,14 @@ export class QvacView extends ItemView {
 
   // Called by the settings tab when tab-visibility toggles change.
   rebuild() { this.buildTabBar(); }
+
+  // Open this plugin's settings tab (the gear in the header). app.setting is not in the public
+  // typings, so reach it through a narrow cast rather than `any`.
+  private openSettings() {
+    const setting = (this.app as unknown as { setting?: { open(): void; openTabById(id: string): void } }).setting;
+    setting?.open();
+    setting?.openTabById(this.plugin.manifest.id);
+  }
 
   async refreshStatus() {
     let h: Health | null = null;
@@ -158,7 +170,10 @@ export class QvacView extends ItemView {
   private renderSetup() {
     const wrap = this.bodyEl.createDiv({ cls: "qvac-setup" });
     wrap.createDiv({ cls: "qvac-train-title", text: "Set up QVAC" });
-    wrap.createDiv({ cls: "qvac-train-desc", text: "Downloads the local AI models (~4.5 GB: a chat model + an embeddings model) into ~/.qvac. This runs once and happens entirely on your machine - nothing leaves it. Search and Connect work as soon as the small embeddings model lands." });
+    const custom = !!this.plugin.settings.customModelSrc;
+    wrap.createDiv({ cls: "qvac-train-desc", text: custom
+      ? "Using your custom chat model, so only the small embeddings model (~300 MB) downloads into ~/.qvac. This runs once and happens entirely on your machine - nothing leaves it."
+      : "Downloads the local AI models (~4.5 GB: a chat model + an embeddings model) into ~/.qvac. This runs once and happens entirely on your machine - nothing leaves it. Search and Connect work as soon as the small embeddings model lands." });
     const btn = wrap.createEl("button", { cls: "qvac-btn-primary", text: "Download & set up" });
     const status = wrap.createDiv({ cls: "qvac-train-status" });
     const barWrap = wrap.createDiv({ cls: "qvac-bar hidden" });

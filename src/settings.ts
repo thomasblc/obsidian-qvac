@@ -15,6 +15,9 @@ export interface QvacSettings {
   tabSearch: boolean;
   tabConnect: boolean;
   tabTrain: boolean;
+  // Optional: use your own chat model (a local GGUF path or a URL) instead of downloading the
+  // default. Empty = use the built-in model picked above. Embeddings still download (small).
+  customModelSrc: string;
 }
 
 // Chat model choices exposed in the picker, with rough resident RAM so users pick for their machine.
@@ -26,7 +29,7 @@ export const CHAT_MODELS: { key: string; label: string }[] = [
 ];
 
 export const DEFAULT_SETTINGS: QvacSettings = {
-  settingsVersion: 3,
+  settingsVersion: 4,
   indexOnStartup: true,
   chatBaseKey: "4b",
   excludeFolders: "",
@@ -38,6 +41,7 @@ export const DEFAULT_SETTINGS: QvacSettings = {
   tabSearch: true,
   tabConnect: true,
   tabTrain: true,
+  customModelSrc: "",
 };
 
 // Additive merge + version stamp. A renamed/removed key in a future version gets a migration step here.
@@ -75,6 +79,11 @@ export class QvacSettingTab extends PluginSettingTab {
         for (const m of CHAT_MODELS) d.addOption(m.key, m.label);
         d.setValue(this.plugin.settings.chatBaseKey || "4b").onChange(async (v) => { this.plugin.settings.chatBaseKey = v; await this.plugin.saveSettings(); });
       });
+
+    new Setting(containerEl)
+      .setName("Custom chat model")
+      .setDesc("Optional. Use your own GGUF instead of downloading the default: an absolute path to a .gguf file on disk, or a model URL. Leave empty to use the model picked above. The small embeddings model still downloads.")
+      .addText((t) => t.setPlaceholder("/path/to/model.gguf").setValue(this.plugin.settings.customModelSrc).onChange(async (v) => { this.plugin.settings.customModelSrc = v.trim(); await this.plugin.saveSettings(); }));
 
     new Setting(containerEl)
       .setName("Index on startup")
