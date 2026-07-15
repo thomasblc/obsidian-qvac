@@ -1,5 +1,6 @@
 import { ItemView, WorkspaceLeaf, MarkdownRenderer, Notice, debounce, setIcon } from "obsidian";
 import type QvacPlugin from "./main";
+import { CreateNoteModal } from "./create-note-modal";
 import type { Hit, Adapter, ChatMessage, Candidate, Health, ChatFrame, ProvisionFrame, ScanFrame, TrainFrame } from "./lib/rpc";
 
 export const VIEW_TYPE_QVAC = "qvac-view";
@@ -255,6 +256,7 @@ export class QvacView extends ItemView {
           acc = res.data?.contentText ?? acc; hits = res.data?.hits ?? hits;
           await this.renderMd(bodyText, acc || "(no answer)");
           this.renderCites(body, hits);
+          this.addCreateNote(body, acc);
           this.history.push({ role: "user", content: q }); this.history.push({ role: "assistant", content: acc });
           if (res.data?.model?.includes("voice")) body.createDiv({ cls: "qvac-msg-model", text: "answered from your vault model" });
         } else { bodyText.removeClass("qvac-typing"); bodyText.setText("Error: " + (res.error ?? "unknown")); }
@@ -263,6 +265,17 @@ export class QvacView extends ItemView {
     };
     sendBtn.onclick = () => { if (this.chatBusy) stop(); else void send(); };
     window.setTimeout(() => ta.focus(), 0);
+  }
+  // Offer to save an assistant answer as a new vault note (path confirmed in a modal).
+  private addCreateNote(msgEl: HTMLElement, content: string) {
+    if (!content.trim()) return;
+    const row = msgEl.createDiv({ cls: "qvac-msg-actions" });
+    const btn = row.createEl("button", { cls: "qvac-pill", text: "Create note" });
+    btn.onclick = () => {
+      const m = /^#\s+(.+)$/m.exec(content);
+      const title = (m ? m[1] : "Untitled").trim().replace(/[\\/:*?"<>|]/g, "-").slice(0, 80) || "Untitled";
+      new CreateNoteModal(this.app, `${title}.md`, (path) => { void this.plugin.createNote(path, content); }).open();
+    };
   }
   private renderMsg(container: HTMLElement, role: "user" | "assistant", text: string, hits: Hit[]): HTMLElement {
     const el = container.createDiv({ cls: `qvac-msg qvac-msg-${role}` });
@@ -331,7 +344,18 @@ export class QvacView extends ItemView {
         });
         const cands = (res.ok && res.data?.candidates) || [];
         scanStatus.setText(cands.length ? `${cands.length} link(s) proposed` : `No missing links found (${res.data?.notes ?? 0} notes).`);
-        for (const c of cands) this.renderProposal(scanResults, c);
+        if (cands.length) {
+          const linkAll = scanResults.createEl("button", { cls: "qvac-pill on qvac-linkall", text: `Link all (${cands.length})` });
+          const list = scanResults.createDiv({ cls: "qvac-connect-list" });
+          for (const c of cands) this.renderProposal(list, c);
+          linkAll.onclick = async () => {
+            linkAll.disabled = true; linkAll.setText("Linking…");
+            let done = 0;
+            for (const c of cands) { if (await this.plugin.insertLink(c.a, c.b)) done++; }
+            list.empty(); linkAll.remove();
+            scanStatus.setText(`Linked ${done} of ${cands.length}.`);
+          };
+        }
       } catch (e) { scanStatus.setText("Scan failed: " + errMsg(e)); }
       finally { scanBtn.disabled = false; }
     };

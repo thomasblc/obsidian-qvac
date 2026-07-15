@@ -80,7 +80,7 @@ async function buildGrounding(vaultId, message) {
   return { grounding, hits };
 }
 function buildSystem(grounding) {
-  let s = "You are QVAC, a fully local AI assistant for the user's Obsidian vault. Be concise and helpful. Your replies render as Markdown. ";
+  let s = "You are QVAC, a fully local AI assistant for the user's Obsidian vault. Be concise and helpful. Your replies render as Markdown. When the user asks you to create, draft, or write a note, output the complete note as Markdown starting with a top-level `# Title`; the user can save it to their vault in one click, so never say you cannot create files. ";
   if (grounding) s += "Answer using the excerpts below and cite them by their [n]. If they do not contain the answer, say so briefly.\n\n" + grounding;
   else s += "No vault excerpts were retrieved for this question; answer from general knowledge and note if you are unsure.";
   return s;

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.11 - 2026-07 - Create notes, select text, link all
+
+- **Create a note from a chat answer.** Each answer gets a "Create note" button: confirm the path
+  and QVAC writes it to your vault (the model no longer claims it cannot create files).
+- **Selectable text** in the panel, so you can copy any answer or search result.
+- **Connect: "Link all"** button to accept every proposed link at once.
+
 ## 0.2.10 - 2026-07 - Setup reflects custom model
 
 - Picking a custom model now updates the Setup panel live: it explains only the small embeddings

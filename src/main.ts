@@ -125,6 +125,31 @@ export default class QvacPlugin extends Plugin {
     else new Notice("QVAC: source not found - " + source);
   }
 
+  // Write an AI-drafted note to the vault (path confirmed by the user in a modal). Creates any
+  // parent folders, refuses to overwrite, then opens the new note.
+  async createNote(rawPath: string, content: string) {
+    let p = rawPath.trim().replace(/^\/+/, "");
+    if (!p) return;
+    if (!p.toLowerCase().endsWith(".md")) p += ".md";
+    const dir = p.includes("/") ? p.slice(0, p.lastIndexOf("/")) : "";
+    if (dir) {
+      const parts = dir.split("/").filter(Boolean);
+      let cur = "";
+      for (const part of parts) {
+        cur = cur ? `${cur}/${part}` : part;
+        if (!this.app.vault.getAbstractFileByPath(cur)) {
+          try { await this.app.vault.createFolder(cur); } catch { /* already exists / race */ }
+        }
+      }
+    }
+    if (this.app.vault.getAbstractFileByPath(p)) { new Notice("QVAC: a note already exists at " + p); return; }
+    try {
+      const f = await this.app.vault.create(p, content);
+      new Notice("QVAC: created " + p);
+      await this.app.workspace.getLeaf(false).openFile(f);
+    } catch (e) { new Notice("QVAC: could not create note - " + errMsg(e)); }
+  }
+
   // ---- inline writing commands + related notes ----
   async complete(system: string, message: string, onFrame?: (f: CompleteFrame) => void) {
     const ws = await this.ensureWs();
