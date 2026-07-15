@@ -147,7 +147,7 @@ export class QvacSettingTab extends PluginSettingTab {
         dropdown = dd;
         dd.addOption("", "Default (download the built-in model)");
         dd.setValue(s.customModelSrc);
-        dd.onChange(async (v) => { s.customModelSrc = v; await this.plugin.saveSettings(); void validate(); });
+        dd.onChange(async (v) => { s.customModelSrc = v; await this.plugin.saveSettings(); this.plugin.refreshOpenViews(); void validate(); });
       });
 
     const status = containerEl.createDiv({ cls: "qvac-status" });
@@ -155,7 +155,7 @@ export class QvacSettingTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName("Or paste a path / URL")
       .setDesc("Advanced: a .gguf outside the folder above, or a model URL. Overrides the dropdown.")
-      .addText((t) => t.setPlaceholder("/path/to/model.gguf or https://…").onChange(async (v) => { s.customModelSrc = v.trim(); await this.plugin.saveSettings(); void populate(); }));
+      .addText((t) => t.setPlaceholder("/path/to/model.gguf or https://…").onChange(async (v) => { s.customModelSrc = v.trim(); await this.plugin.saveSettings(); this.plugin.refreshOpenViews(); void populate(); }));
 
     const validate = async () => {
       status.removeClass("is-connected"); status.removeClass("is-disconnected");

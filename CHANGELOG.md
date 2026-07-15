@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.10 - 2026-07 - Setup reflects custom model
+
+- Picking a custom model now updates the Setup panel live: it explains only the small embeddings
+  model (~300 MB) still downloads, and the button says so. (You still run setup once for embeddings,
+  which power search, Connect, and chat grounding.)
+
 ## 0.2.9 - 2026-07 - Model picker
 
 - Custom chat model is now a proper picker: choose a folder (defaults to QVAC's model store),

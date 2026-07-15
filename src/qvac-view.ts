@@ -174,7 +174,7 @@ export class QvacView extends ItemView {
     wrap.createDiv({ cls: "qvac-train-desc", text: custom
       ? "Using your custom chat model, so only the small embeddings model (~300 MB) downloads into ~/.qvac. This runs once and happens entirely on your machine - nothing leaves it."
       : "Downloads the local AI models (~4.5 GB: a chat model + an embeddings model) into ~/.qvac. This runs once and happens entirely on your machine - nothing leaves it. Search and Connect work as soon as the small embeddings model lands." });
-    const btn = wrap.createEl("button", { cls: "qvac-btn-primary", text: "Download & set up" });
+    const btn = wrap.createEl("button", { cls: "qvac-btn-primary", text: custom ? "Download embeddings (~300 MB) & finish" : "Download & set up" });
     const status = wrap.createDiv({ cls: "qvac-train-status" });
     const barWrap = wrap.createDiv({ cls: "qvac-bar hidden" });
     const bar = barWrap.createDiv({ cls: "qvac-bar-fill" });
