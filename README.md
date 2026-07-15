@@ -1,4 +1,4 @@
-# QVAC for Obsidian
+# Local AI for your vault
 
 **Chat with your vault, fully local.** An Obsidian plugin that runs AI entirely on your machine: semantic search, cited answers, related-notes, inline writing commands, OCR over your images, and an optional model fine-tuned on your own notes. **Nothing leaves your computer.**
 

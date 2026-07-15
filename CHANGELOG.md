@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.4 - 2026-07 - README title
+
+- README title now matches the plugin name ("Local AI for your vault").
+
 ## 0.2.3 - 2026-07 - Review polish
 
 Pushes the automated review toward a clean report. No behavior change.
