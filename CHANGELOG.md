@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.9 - 2026-07 - Model picker
+
+- Custom chat model is now a proper picker: choose a folder (defaults to QVAC's model store),
+  pick from the .gguf models found, and see instant validation (exists + real GGUF) instead of
+  typing a blind path. A path/URL field remains for models outside the folder. Companion >= 0.2.9.
+
 ## 0.2.8 - 2026-07 - Connect honors the custom model
 
 - Fix: the Connect scan now uses your custom chat model too (it was still pulling the default

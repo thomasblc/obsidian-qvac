@@ -7,6 +7,7 @@ import { insertRelatedSection } from "./lib/links";
 import type {
   Hit, Adapter, ChatMessage, ManifestEntry,
   Health, ChatData, CompleteData, HitsData, ScanData, TrainData, AdaptersData, ManifestData,
+  ModelsData, CheckData,
   ChatFrame, CompleteFrame, ProvisionFrame, ScanFrame, TrainFrame,
 } from "./lib/rpc";
 import { QvacSettings, DEFAULT_SETTINGS, migrateSettings, QvacSettingTab } from "./settings";
@@ -104,6 +105,19 @@ export default class QvacPlugin extends Plugin {
   }
   isProvisioned(): boolean { return this.settings.provisioned; }
   async markProvisioned() { this.settings.provisioned = true; await this.saveSettings(); }
+
+  // Browse candidate chat models (.gguf) in a folder, for the settings dropdown.
+  async listModels(dir: string): Promise<ModelsData> {
+    const ws = await this.ensureWs();
+    const r = await ws.rpc<ModelsData>("models.scan", { dir }, { timeoutMs: 15000 });
+    return r.data ?? { dir, models: [] };
+  }
+  // Cheaply validate a chosen model source (exists + is a GGUF; URLs pass through).
+  async checkModel(src: string): Promise<CheckData> {
+    const ws = await this.ensureWs();
+    const r = await ws.rpc<CheckData>("model.check", { modelSrc: src || undefined }, { timeoutMs: 15000 });
+    return r.data ?? { ok: false, error: "no response from companion" };
+  }
 
   async openSource(source: string) {
     const f = this.app.vault.getFileByPath(source);

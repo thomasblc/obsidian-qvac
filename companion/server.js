@@ -7,8 +7,8 @@
 import http from "node:http";
 import path from "node:path";
 import crypto from "node:crypto";
-import { unlinkSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { unlinkSync, writeFileSync, readdirSync, statSync, openSync, readSync, closeSync } from "node:fs";
+import { tmpdir, homedir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { WebSocketServer } from "ws";
 import { EMBEDDINGGEMMA_300M_Q4_0 } from "@qvac/sdk";
@@ -38,6 +38,26 @@ const MODEL_OPS = new Set(["chat", "search", "embed-doc", "index", "complete", "
 // A user-configured custom chat model (GGUF path or URL) from the plugin settings, if any.
 function customModelSrc(msg) {
   return (typeof msg.modelSrc === "string" && msg.modelSrc.trim()) ? msg.modelSrc.trim() : null;
+}
+
+// ---- custom-model helpers (folder browse + cheap validation, no worker load) ----
+function expandHome(p) {
+  const s = String(p || "");
+  return s.startsWith("~") ? path.join(homedir(), s.slice(1)) : s;
+}
+function isRemoteSrc(s) { return /^(https?|pear|registry):\/\//i.test(String(s || "")); }
+// A model file whose name looks like a NON-chat asset (embedder, TTS, OCR, diffusion, ASR...).
+const NON_CHAT = /embed|supertonic|parakeet|whisper|stable-diffusion|\bsd[-_]|ocr|craft|clip|mmproj|projection|\btts\b|\bvad\b|nmt|bergamot|smolvla|\bvla\b/i;
+// Read the first 4 bytes and confirm the GGUF magic, without loading the model.
+function isGgufFile(absPath) {
+  let fd;
+  try {
+    fd = openSync(absPath, "r");
+    const buf = Buffer.alloc(4);
+    readSync(fd, buf, 0, 4, 0);
+    return buf.toString("latin1") === "GGUF";
+  } catch { return false; }
+  finally { if (fd !== undefined) { try { closeSync(fd); } catch { /* */ } } }
 }
 
 const indexes = new Map(); // vaultId -> ContextIndex
@@ -117,6 +137,38 @@ async function judgeLink(a, b, modelSrc = null) {
 const handlers = {
   async health() {
     return { version: VERSION, models: mm.status(), vaults: [...indexes.keys()] };
+  },
+
+  // List candidate chat models (.gguf) in a folder, for the settings dropdown. Default: QVAC's own
+  // model store (~/.qvac/models). fs-only, no worker load. Non-chat assets are filtered out.
+  "models.scan"(msg) {
+    const dir = expandHome(msg.dir || "~/.qvac/models");
+    let entries = [];
+    try { entries = readdirSync(dir); } catch (e) { return { dir, models: [], error: String(e?.message || e) }; }
+    const models = [];
+    for (const name of entries) {
+      if (!name.toLowerCase().endsWith(".gguf") || NON_CHAT.test(name)) continue;
+      const abs = path.join(dir, name);
+      let sizeMB = 0;
+      try { sizeMB = Math.round(statSync(abs).size / (1024 * 1024)); } catch { continue; }
+      models.push({ name, path: abs, sizeMB });
+    }
+    models.sort((a, b) => a.name.localeCompare(b.name));
+    return { dir, models };
+  },
+
+  // Cheap validation of a chosen model source (no worker load): confirm a local path exists and is a
+  // real GGUF; remote URLs are accepted as-is (validated for real on first use).
+  "model.check"(msg) {
+    const src = customModelSrc(msg);
+    if (!src) return { ok: true, kind: "default" };
+    if (isRemoteSrc(src)) return { ok: true, kind: "url" };
+    const abs = expandHome(src);
+    let st;
+    try { st = statSync(abs); } catch { return { ok: false, error: "File not found." }; }
+    if (!st.isFile()) return { ok: false, error: "Not a file." };
+    if (!isGgufFile(abs)) return { ok: false, error: "Not a GGUF file (missing GGUF header)." };
+    return { ok: true, kind: "gguf", sizeMB: Math.round(st.size / (1024 * 1024)) };
   },
 
   async index(msg, push) {

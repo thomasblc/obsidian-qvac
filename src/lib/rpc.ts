@@ -70,6 +70,22 @@ export interface AdaptersData {
 export interface ManifestData {
   manifest?: Record<string, ManifestEntry>;
 }
+export interface ModelFile {
+  name: string;
+  path: string;
+  sizeMB: number;
+}
+export interface ModelsData {
+  dir: string;
+  models: ModelFile[];
+  error?: string;
+}
+export interface CheckData {
+  ok: boolean;
+  kind?: string;
+  sizeMB?: number;
+  error?: string;
+}
 
 // ---- streaming frame payloads, per rpc ----
 export interface ChatFrame extends Frame {

@@ -1,5 +1,6 @@
 import { App, PluginSettingTab, Setting, DropdownComponent } from "obsidian";
 import type QvacPlugin from "./main";
+import type { ModelsData } from "./lib/rpc";
 
 export interface QvacSettings {
   settingsVersion: number;
@@ -18,6 +19,7 @@ export interface QvacSettings {
   // Optional: use your own chat model (a local GGUF path or a URL) instead of downloading the
   // default. Empty = use the built-in model picked above. Embeddings still download (small).
   customModelSrc: string;
+  modelsFolder: string; // folder browsed for local .gguf models in settings
 }
 
 // Chat model choices exposed in the picker, with rough resident RAM so users pick for their machine.
@@ -29,7 +31,7 @@ export const CHAT_MODELS: { key: string; label: string }[] = [
 ];
 
 export const DEFAULT_SETTINGS: QvacSettings = {
-  settingsVersion: 4,
+  settingsVersion: 5,
   indexOnStartup: true,
   chatBaseKey: "4b",
   excludeFolders: "",
@@ -42,6 +44,7 @@ export const DEFAULT_SETTINGS: QvacSettings = {
   tabConnect: true,
   tabTrain: true,
   customModelSrc: "",
+  modelsFolder: "~/.qvac/models",
 };
 
 // Additive merge + version stamp. A renamed/removed key in a future version gets a migration step here.
@@ -80,10 +83,8 @@ export class QvacSettingTab extends PluginSettingTab {
         d.setValue(this.plugin.settings.chatBaseKey || "4b").onChange(async (v) => { this.plugin.settings.chatBaseKey = v; await this.plugin.saveSettings(); });
       });
 
-    new Setting(containerEl)
-      .setName("Custom chat model")
-      .setDesc("Optional. Use your own GGUF instead of downloading the default: an absolute path to a .gguf file on disk, or a model URL. Leave empty to use the model picked above. The small embeddings model still downloads.")
-      .addText((t) => t.setPlaceholder("/path/to/model.gguf").setValue(this.plugin.settings.customModelSrc).onChange(async (v) => { this.plugin.settings.customModelSrc = v.trim(); await this.plugin.saveSettings(); }));
+    new Setting(containerEl).setName("Custom chat model").setHeading();
+    this.renderModelPicker(containerEl);
 
     new Setting(containerEl)
       .setName("Index on startup")
@@ -125,5 +126,64 @@ export class QvacSettingTab extends PluginSettingTab {
       .setName("Style the graph")
       .setDesc("Color the Obsidian graph nodes by folder. Reopen the Graph view after applying.")
       .addButton((b) => b.setButtonText("Color by folder").onClick(() => { void this.plugin.colorGraph(); }));
+  }
+
+  // Folder + dropdown + live validation for the custom chat model (replaces a raw path field).
+  private renderModelPicker(containerEl: HTMLElement) {
+    const s = this.plugin.settings;
+    const basename = (p: string) => p.split("/").pop() || p;
+    let dropdown: DropdownComponent | null = null;
+
+    new Setting(containerEl)
+      .setName("Models folder")
+      .setDesc("Folder scanned for local .gguf chat models. Default is QVAC's own model store.")
+      .addText((t) => t.setValue(s.modelsFolder).onChange(async (v) => { s.modelsFolder = v.trim() || "~/.qvac/models"; await this.plugin.saveSettings(); }))
+      .addExtraButton((b) => b.setIcon("refresh-cw").setTooltip("Rescan folder").onClick(() => { void populate(); }));
+
+    new Setting(containerEl)
+      .setName("Model")
+      .setDesc("Pick a local model, or keep Default to download the built-in one. The small embeddings model still downloads either way.")
+      .addDropdown((dd) => {
+        dropdown = dd;
+        dd.addOption("", "Default (download the built-in model)");
+        dd.setValue(s.customModelSrc);
+        dd.onChange(async (v) => { s.customModelSrc = v; await this.plugin.saveSettings(); void validate(); });
+      });
+
+    const status = containerEl.createDiv({ cls: "qvac-status" });
+
+    new Setting(containerEl)
+      .setName("Or paste a path / URL")
+      .setDesc("Advanced: a .gguf outside the folder above, or a model URL. Overrides the dropdown.")
+      .addText((t) => t.setPlaceholder("/path/to/model.gguf or https://…").onChange(async (v) => { s.customModelSrc = v.trim(); await this.plugin.saveSettings(); void populate(); }));
+
+    const validate = async () => {
+      status.removeClass("is-connected"); status.removeClass("is-disconnected");
+      if (!s.customModelSrc) { status.setText("Using the built-in model (downloads on first setup)."); return; }
+      status.setText("Checking model…");
+      try {
+        const r = await this.plugin.checkModel(s.customModelSrc);
+        if (r.ok) { status.setText(`Ready: ${basename(s.customModelSrc)}${r.sizeMB ? ` (${r.sizeMB} MB)` : ""}`); status.addClass("is-connected"); }
+        else { status.setText(`Cannot use this model: ${r.error ?? "invalid"}`); status.addClass("is-disconnected"); }
+      } catch { status.setText("Start the companion to validate the model."); }
+    };
+
+    const populate = async () => {
+      if (dropdown === null) return;
+      const d = dropdown;
+      status.setText("Scanning folder…");
+      let data: ModelsData;
+      try { data = await this.plugin.listModels(s.modelsFolder); }
+      catch { status.setText("Start the companion to browse models (or paste a path below)."); return; }
+      d.selectEl.empty();
+      d.addOption("", "Default (download the built-in model)");
+      for (const m of data.models) d.addOption(m.path, `${m.name} (${m.sizeMB} MB)`);
+      if (s.customModelSrc && !data.models.some((m) => m.path === s.customModelSrc)) d.addOption(s.customModelSrc, `(custom) ${basename(s.customModelSrc)}`);
+      d.setValue(s.customModelSrc);
+      if (data.error) { status.setText(`Folder not readable: ${data.error}`); status.addClass("is-disconnected"); return; }
+      void validate();
+    };
+
+    void populate();
   }
 }
