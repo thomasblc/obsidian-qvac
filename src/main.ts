@@ -105,6 +105,8 @@ export default class QvacPlugin extends Plugin {
   }
   // Persist the embedder choice on the companion (used when it changes after first setup).
   async setEmbedConfig() {
+    // Persist the embedder choice on the companion (which drops stale vectors if it changed).
+    // Reindexing is triggered by the caller on a deliberate change, not on every keystroke.
     try { const ws = await this.ensureWs(); await ws.rpc("config", { embedSrc: this.settings.customEmbedSrc || undefined }); }
     catch { /* companion offline; applied at next provision/connect */ }
   }

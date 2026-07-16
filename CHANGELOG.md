@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.15 - 2026-07 - Embedder-swap safety
+
+- Changing the embedding model can no longer silently break search. The index is tagged with the
+  embedder that built it; queries refuse (clear error) or return nothing on a mismatch instead of
+  wrong results, stale vectors are dropped, and the plugin reindexes automatically on a change.
+
 ## 0.2.14 - 2026-07 - Choose both models at setup
 
 - The first-run Setup panel now lets you choose the chat model AND the embedding model: download

@@ -52,6 +52,13 @@ function customModelSrc(msg) {
 function customEmbedSrc(msg) {
   return (typeof msg.embedSrc === "string" && msg.embedSrc.trim()) ? msg.embedSrc.trim() : null;
 }
+function currentEmbedTag() { return mm.embedSrc || "default"; }
+// Refuse to query an index built by a different embedder (same-dim models would return silently
+// wrong results). The dimension mismatch is separately guarded inside ContextIndex.search.
+function assertEmbedMatch(idx) {
+  if (idx.records.length && idx.embedTag && idx.embedTag !== currentEmbedTag())
+    throw new Error("The embedding model changed since this vault was indexed. Run 'Reindex vault (full)' in QVAC.");
+}
 
 // ---- custom-model helpers (folder browse + cheap validation, no worker load) ----
 function expandHome(p) {
@@ -84,6 +91,7 @@ function getIndex(vaultId) {
 async function buildGrounding(vaultId, message) {
   const idx = getIndex(vaultId);
   if (!idx.records.length) return { grounding: "", hits: [] };
+  assertEmbedMatch(idx);
   const qv = (await mm.embedMany([message]))[0];
   const hits = idx.search(qv, { topK: GROUND_TOPK, minScore: 0.3 })
     .map((h) => ({ source: h.source, sourceType: h.sourceType, score: Number(h.score.toFixed(4)), content: String(h.text).slice(0, GROUND_CHARS) }));
@@ -192,8 +200,12 @@ const handlers = {
   // a reindex, since existing vectors were produced by the previous embedder.
   config(msg) {
     const embedSrc = customEmbedSrc(msg);
+    const changed = (embedSrc || null) !== mm.embedSrc;
     mm.setEmbedSrc(embedSrc);
     saveEmbedSrc(embedSrc);
+    // The embedder changed: existing vectors are stale. Drop loaded indexes so queries return
+    // nothing (safe) instead of wrong hits until the plugin reindexes.
+    if (changed) for (const idx of indexes.values()) idx.reset();
     return { ok: true, embedSrc };
   },
 
@@ -211,6 +223,7 @@ const handlers = {
     const { vaultId, query, topK = 8 } = msg;
     const idx = getIndex(vaultId);
     if (!idx.records.length) return { hits: [] };
+    assertEmbedMatch(idx);
     const qv = (await mm.embedMany([String(query || "")]))[0];
     const hits = idx.search(qv, { topK }).map((h) => ({ source: h.source, sourceType: h.sourceType, score: Number(h.score.toFixed(4)), content: h.text }));
     return { hits };
@@ -220,7 +233,13 @@ const handlers = {
   async "embed-doc"(msg) {
     const { vaultId, path: docPath, text, mtime, sourceType } = msg;
     if (!docPath) throw new Error("embed-doc requires path");
-    return getIndex(vaultId).upsertDoc(docPath, text, mtime, (texts, opts) => mm.embedMany(texts, opts), sourceType || "vault");
+    const idx = getIndex(vaultId);
+    // Embedder changed since this index was built: drop the old vectors so we never mix two models
+    // (a full reindex then repopulates cleanly with the new one).
+    if (idx.records.length && idx.embedTag && idx.embedTag !== currentEmbedTag()) idx.reset();
+    const r = await idx.upsertDoc(docPath, text, mtime, (texts, opts) => mm.embedMany(texts, opts), sourceType || "vault");
+    if (idx.embedTag !== currentEmbedTag()) idx.stampEmbed(currentEmbedTag());
+    return r;
   },
   async "drop-doc"(msg) {
     const { vaultId, path: docPath } = msg;
@@ -247,6 +266,7 @@ const handlers = {
     const { vaultId, text, excludePath, topK = 5 } = msg;
     const idx = getIndex(vaultId);
     if (!idx.records.length || !String(text || "").trim()) return { hits: [] };
+    assertEmbedMatch(idx);
     const qv = (await mm.embedMany([String(text).slice(0, 2000)]))[0];
     const seen = new Set();
     const hits = [];
@@ -267,6 +287,7 @@ const handlers = {
     const { vaultId, existingPairs = [], minScore = 0.35, maxCandidates = 20, judge = true } = msg;
     const modelSrc = customModelSrc(msg);
     const idx = getIndex(vaultId);
+    assertEmbedMatch(idx);
     let notes = noteVectors(idx);
     // bound the O(N^2) pairwise scan so a huge (or hostile synced) vault can't wedge the worker
     const MAX_NOTES = 2000;

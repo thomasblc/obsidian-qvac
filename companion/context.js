@@ -38,6 +38,7 @@ export class ContextIndex {
     this.records = []; // [{ sourceId, source, sourceType, text }] aligned to this.vectors
     this.vectors = []; // number[][]
     this.dim = 0;
+    this.embedTag = ""; // identity of the embedder that produced these vectors (guards a model swap)
     this.docs = {};    // path -> { mtime, chunks, sourceType } for the incremental push model (Phase 0b)
     this._load();
   }
@@ -48,6 +49,7 @@ export class ContextIndex {
       this.sources = Array.isArray(meta.sources) ? meta.sources : [];
       this.records = Array.isArray(meta.records) ? meta.records : [];
       this.dim = Number(meta.dim) || 0;
+      this.embedTag = typeof meta.embedTag === "string" ? meta.embedTag : "";
       this.docs = (meta.docs && typeof meta.docs === "object") ? meta.docs : {};
       if (this.dim && this.records.length) {
         const buf = fs.readFileSync(this.vecs);
@@ -60,7 +62,7 @@ export class ContextIndex {
       } else if (this.records.length) { throw new Error("records without a dim"); }
       if (this.vectors.length !== this.records.length) throw new Error("record/vector misalignment");
     } catch {
-      this.records = []; this.vectors = []; this.dim = 0; this.docs = {};
+      this.records = []; this.vectors = []; this.dim = 0; this.embedTag = ""; this.docs = {};
       this.sources = (this.sources || []).map((s) => ({ ...s, docCount: 0, chunkCount: 0 }));
     }
   }
@@ -74,9 +76,18 @@ export class ContextIndex {
         fs.writeFileSync(this.vecs + ".tmp", Buffer.from(f.buffer, f.byteOffset, f.byteLength));
         fs.renameSync(this.vecs + ".tmp", this.vecs);
       } else { try { fs.unlinkSync(this.vecs); } catch { /* */ } }
-      fs.writeFileSync(this.meta + ".tmp", JSON.stringify({ dim: this.dim, sources: this.sources, records: this.records, docs: this.docs }));
+      fs.writeFileSync(this.meta + ".tmp", JSON.stringify({ dim: this.dim, embedTag: this.embedTag, sources: this.sources, records: this.records, docs: this.docs }));
       fs.renameSync(this.meta + ".tmp", this.meta);
     } catch (e) { console.error("[context] save failed (index kept in memory this session):", e?.message || e); }
+  }
+
+  // Record which embedder produced the current vectors (so a later model swap is detectable).
+  stampEmbed(tag) { this.embedTag = tag || ""; this._save(); }
+  // Drop all vectors/records (keeps source configs); used when the embedder changes.
+  reset() {
+    this.records = []; this.vectors = []; this.dim = 0; this.embedTag = ""; this.docs = {};
+    this.sources = this.sources.map((s) => ({ ...s, docCount: 0, chunkCount: 0 }));
+    this._save();
   }
 
   stats() {
@@ -234,6 +245,9 @@ export class ContextIndex {
   // Cosine top-k over all (or a filtered set of) sources. Returns citable records + scores.
   search(queryVec, { topK = 8, sourceIds = null, minScore = 0.3 } = {}) {
     if (!this.records.length) return [];
+    // Safety net: a query vector from a different embedder (wrong dimension) can never match; bail
+    // instead of producing NaN/garbage scores.
+    if (this.dim && queryVec.length !== this.dim) return [];
     const allow = sourceIds && sourceIds.length ? new Set(sourceIds) : null;
     const scored = [];
     for (let i = 0; i < this.records.length; i++) {

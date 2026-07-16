@@ -1,4 +1,4 @@
-import { App, PluginSettingTab, Setting, DropdownComponent } from "obsidian";
+import { App, PluginSettingTab, Setting, DropdownComponent, Notice, debounce } from "obsidian";
 import type QvacPlugin from "./main";
 import type { ModelsData } from "./lib/rpc";
 
@@ -141,9 +141,12 @@ export class QvacSettingTab extends PluginSettingTab {
     const basename = (p: string) => p.split("/").pop() || p;
     let dropdown: DropdownComponent | null = null;
 
-    const persist = async () => {
+    const persist = async (reindex = false) => {
       await this.plugin.saveSettings();
-      if (isEmbed) await this.plugin.setEmbedConfig();
+      if (isEmbed) {
+        await this.plugin.setEmbedConfig(); // drops stale vectors on the companion if it changed
+        if (reindex && this.plugin.isProvisioned()) { new Notice("QVAC: embedding model changed, reindexing…"); void this.plugin.indexVault(true); }
+      }
       this.plugin.refreshOpenViews();
     };
 
@@ -164,15 +167,17 @@ export class QvacSettingTab extends PluginSettingTab {
         dropdown = dd;
         dd.addOption("", "Default (download the built-in model)");
         dd.setValue(s[key]);
-        dd.onChange(async (v) => { s[key] = v; await persist(); void validate(); });
+        dd.onChange(async (v) => { s[key] = v; await persist(true); void validate(); });
       });
 
     const status = containerEl.createDiv({ cls: "qvac-status" });
 
+    // Debounced so typing a path does not reset the companion index (and reindex) on every keystroke.
+    const applyPaste = debounce((v: string) => { s[key] = v; void persist(true).then(() => populate()); }, 800, true);
     new Setting(containerEl)
       .setName("Or paste a path / URL")
       .setDesc("Advanced: a .gguf outside the folder above, or a model URL. Overrides the dropdown.")
-      .addText((t) => t.setPlaceholder("/path/to/model.gguf or https://…").onChange(async (v) => { s[key] = v.trim(); await persist(); void populate(); }));
+      .addText((t) => t.setPlaceholder("/path/to/model.gguf or https://…").onChange((v) => applyPaste(v.trim())));
 
     const validate = async () => {
       status.removeClass("is-connected"); status.removeClass("is-disconnected");
