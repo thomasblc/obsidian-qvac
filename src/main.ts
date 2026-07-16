@@ -339,7 +339,7 @@ export default class QvacPlugin extends Plugin {
       groups.push({ query: `path:"${folder}/"`, color: { a: 1, rgb: palette[n % palette.length] } });
       n++;
     }
-    const path = ".obsidian/graph.json";
+    const path = `${this.app.vault.configDir}/graph.json`;
     let cfg: Record<string, unknown> = {};
     try { cfg = JSON.parse(await this.app.vault.adapter.read(path)) as Record<string, unknown>; } catch { /* no existing config */ }
     cfg.colorGroups = groups;

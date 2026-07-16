@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.13 - 2026-07 - Respect the config dir
+
+- "Color graph by folder" writes to the vault's actual config dir (Vault#configDir) instead of a
+  hardcoded .obsidian, so it works when the user renamed that folder.
+
 ## 0.2.12 - 2026-07 - Note-path hardening
 
 - Create note rejects a hand-typed `..` path so it can never write outside the vault.
