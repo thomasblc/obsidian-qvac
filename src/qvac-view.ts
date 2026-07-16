@@ -27,6 +27,9 @@ export class QvacView extends ItemView {
   private history: ChatMessage[] = [];
   private chatBusy = false;
   private chatAbort = false; // Stop button: ignore further tokens for the current turn
+  // Pairs linked this session, so a re-scan does not re-propose them while Obsidian's resolvedLinks
+  // graph is still catching up to the just-written links.
+  private connectLinked = new Set<string>();
 
   constructor(leaf: WorkspaceLeaf, private plugin: QvacPlugin) { super(leaf); }
 
@@ -185,17 +188,32 @@ export class QvacView extends ItemView {
       sel.value = current;
     };
 
+    const chatSel = document.createElement("select");
+    const embedSel = document.createElement("select");
+    const refill = () => {
+      void fillSelect(chatSel, "chat", s.customModelSrc, "Download the default (Qwen3 4B, ~2.5 GB)");
+      void fillSelect(embedSel, "embed", s.customEmbedSrc, "Download the default (EmbeddingGemma, ~300 MB)");
+    };
+
+    // Folder to browse for local models (not everyone keeps them in ~/.qvac/models).
+    const folderRow = wrap.createDiv({ cls: "qvac-setup-row" });
+    folderRow.createDiv({ cls: "qvac-setup-label", text: "Models folder" });
+    const folderInput = folderRow.createEl("input", { cls: "qvac-fullwidth", attr: { type: "text", placeholder: "~/.qvac/models" } });
+    folderInput.value = s.modelsFolder;
+    const applyFolder = debounce((v: string) => { s.modelsFolder = v.trim() || "~/.qvac/models"; void this.plugin.saveSettings(); refill(); }, 500, true);
+    folderInput.addEventListener("input", () => applyFolder(folderInput.value));
+
     const chatRow = wrap.createDiv({ cls: "qvac-setup-row" });
     chatRow.createDiv({ cls: "qvac-setup-label", text: "Chat model" });
-    const chatSel = chatRow.createEl("select", { cls: "dropdown qvac-fullwidth" });
-    void fillSelect(chatSel, "chat", s.customModelSrc, "Download the default (Qwen3 4B, ~2.5 GB)");
+    chatSel.addClass("dropdown"); chatSel.addClass("qvac-fullwidth"); chatRow.appendChild(chatSel);
     chatSel.onchange = () => { s.customModelSrc = chatSel.value; };
 
     const embedRow = wrap.createDiv({ cls: "qvac-setup-row" });
     embedRow.createDiv({ cls: "qvac-setup-label", text: "Embedding model" });
-    const embedSel = embedRow.createEl("select", { cls: "dropdown qvac-fullwidth" });
-    void fillSelect(embedSel, "embed", s.customEmbedSrc, "Download the default (EmbeddingGemma, ~300 MB)");
+    embedSel.addClass("dropdown"); embedSel.addClass("qvac-fullwidth"); embedRow.appendChild(embedSel);
     embedSel.onchange = () => { s.customEmbedSrc = embedSel.value; };
+
+    refill();
 
     const btn = wrap.createEl("button", { cls: "qvac-btn-primary", text: "Set up" });
     const status = wrap.createDiv({ cls: "qvac-train-status" });
@@ -305,7 +323,9 @@ export class QvacView extends ItemView {
     const el = container.createDiv({ cls: `qvac-msg qvac-msg-${role}` });
     el.createDiv({ cls: "qvac-msg-role", text: role === "user" ? "You" : "QVAC" });
     const b = el.createDiv({ cls: "qvac-msg-body" });
-    if (text) b.setText(text);
+    // Assistant answers are Markdown: render them (so formatting survives a tab switch / history
+    // re-render). User messages stay plain text.
+    if (text) { if (role === "assistant") { void this.renderMd(b, text); this.addCreateNote(el, text); } else b.setText(text); }
     if (hits.length) this.renderCites(el, hits);
     container.scrollTop = container.scrollHeight;
     return el;
@@ -363,11 +383,14 @@ export class QvacView extends ItemView {
     scanBtn.onclick = async () => {
       scanBtn.disabled = true; scanStatus.setText("Scanning…"); scanResults.empty();
       try {
-        const res = await this.plugin.connectScan(this.plugin.existingLinkPairs(), (f: ScanFrame) => {
+        // Exclude both Obsidian's known links AND anything we linked this session (resolvedLinks can lag).
+        const existing = this.plugin.existingLinkPairs();
+        for (const k of this.connectLinked) { const [a, b] = k.split("\n"); existing.push([a, b]); }
+        const res = await this.plugin.connectScan(existing, (f: ScanFrame) => {
           if (f.type === "connect.progress") scanStatus.setText(`Judging ${f.done}/${f.total} candidates…`);
         });
         const cands = (res.ok && res.data?.candidates) || [];
-        scanStatus.setText(cands.length ? `${cands.length} link(s) proposed` : `No missing links found (${res.data?.notes ?? 0} notes).`);
+        scanStatus.setText(cands.length ? `${cands.length} link(s) proposed` : `No more missing links (${res.data?.notes ?? 0} notes).`);
         if (cands.length) {
           const linkAll = scanResults.createEl("button", { cls: "qvac-pill on qvac-linkall", text: `Link all (${cands.length})` });
           const list = scanResults.createDiv({ cls: "qvac-connect-list" });
@@ -375,9 +398,9 @@ export class QvacView extends ItemView {
           linkAll.onclick = async () => {
             linkAll.disabled = true; linkAll.setText("Linking…");
             let done = 0;
-            for (const c of cands) { if (await this.plugin.insertLink(c.a, c.b)) done++; }
+            for (const c of cands) { if (await this.plugin.insertLink(c.a, c.b)) { this.connectLinked.add(this.pairKey(c.a, c.b)); done++; } }
             list.empty(); linkAll.remove();
-            scanStatus.setText(`Linked ${done} of ${cands.length}.`);
+            scanStatus.setText(`Linked ${done} of ${cands.length}. Scan again for more, or stop here.`);
           };
         }
       } catch (e) { scanStatus.setText("Scan failed: " + errMsg(e)); }
@@ -414,9 +437,11 @@ export class QvacView extends ItemView {
     card.createDiv({ cls: "qvac-proposal-reason", text: c.reason });
     const acts = card.createDiv({ cls: "qvac-proposal-acts" });
     const linkBtn = acts.createEl("button", { cls: "qvac-pill on", text: "Link" });
-    linkBtn.onclick = async () => { if (await this.plugin.insertLink(c.a, c.b)) { card.addClass("qvac-done"); linkBtn.setText("✓ Linked"); linkBtn.disabled = true; } };
+    linkBtn.onclick = async () => { if (await this.plugin.insertLink(c.a, c.b)) { this.connectLinked.add(this.pairKey(c.a, c.b)); card.addClass("qvac-done"); linkBtn.setText("Linked"); linkBtn.disabled = true; } };
     acts.createEl("button", { cls: "qvac-pill", text: "Skip" }).onclick = () => card.remove();
   }
+  // Stable key for an undirected note pair (newline separator: cannot occur in a path).
+  private pairKey(a: string, b: string): string { return [a, b].sort().join("\n"); }
   // a related-note row for the active note: open, score, and "+ Link" (or "✓ linked").
   private renderRelatedRow(container: HTMLElement, fromPath: string, h: Hit, linked: boolean) {
     const card = container.createDiv({ cls: "qvac-result" });

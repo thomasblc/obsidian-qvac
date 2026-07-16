@@ -225,7 +225,9 @@ const handlers = {
     if (!idx.records.length) return { hits: [] };
     assertEmbedMatch(idx);
     const qv = (await mm.embedMany([String(query || "")]))[0];
-    const hits = idx.search(qv, { topK }).map((h) => ({ source: h.source, sourceType: h.sourceType, score: Number(h.score.toFixed(4)), content: h.text }));
+    // Filter weak matches so a query with no real hit (e.g. "urgent tasks" in a vault that has none)
+    // returns few/none rather than a wall of ~35% noise.
+    const hits = idx.search(qv, { topK, minScore: 0.4 }).map((h) => ({ source: h.source, sourceType: h.sourceType, score: Number(h.score.toFixed(4)), content: h.text }));
     return { hits };
   },
 

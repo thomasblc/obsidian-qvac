@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.2.16 - 2026-07 - Setup folder, chat formatting, connect + search tuning
+
+- Setup panel: pick the models FOLDER too (not everyone keeps models in ~/.qvac/models).
+- Chat: answers keep their Markdown formatting when you leave and return to the tab (history
+  re-render now renders Markdown, not raw text).
+- Connect: links made this session are excluded from the next scan (no re-proposing while
+  Obsidian catches up), and the score threshold is higher so it proposes fewer, stronger links.
+- AI Search: weak matches (<40%) are filtered, so a query with no real hit returns few/none
+  instead of a wall of noise.
+
 ## 0.2.15 - 2026-07 - Embedder-swap safety
 
 - Changing the embedding model can no longer silently break search. The index is tagged with the

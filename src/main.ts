@@ -192,7 +192,7 @@ export default class QvacPlugin extends Plugin {
   }
   async connectScan(existingPairs: string[][], onFrame: (f: ScanFrame) => void) {
     const ws = await this.ensureWs();
-    return ws.rpc<ScanData, ScanFrame>("connect.scan", { vaultId: this.vaultId, existingPairs, minScore: 0.3, maxCandidates: 20, modelSrc: this.settings.customModelSrc || undefined }, { onFrame, timeoutMs: 10 * 60 * 1000 });
+    return ws.rpc<ScanData, ScanFrame>("connect.scan", { vaultId: this.vaultId, existingPairs, minScore: 0.42, maxCandidates: 20, modelSrc: this.settings.customModelSrc || undefined }, { onFrame, timeoutMs: 10 * 60 * 1000 });
   }
   // Insert [[to]] into the note `from`, under a "## Related" section (created if missing). Uses
   // vault.process (atomic read-modify-write). Hardened (review-pass): identity dedup via the
