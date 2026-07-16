@@ -101,15 +101,20 @@ export default class QvacPlugin extends Plugin {
   // multi-GB stall inside a timed rpc). Embeddings enable search + Connect in minutes; chat second.
   async provision(onFrame: (f: ProvisionFrame) => void) {
     const ws = await this.ensureWs();
-    return ws.rpc<unknown, ProvisionFrame>("provision", { modelSrc: this.settings.customModelSrc || undefined }, { onFrame, timeoutMs: 60 * 60 * 1000 });
+    return ws.rpc<unknown, ProvisionFrame>("provision", { modelSrc: this.settings.customModelSrc || undefined, embedSrc: this.settings.customEmbedSrc || undefined }, { onFrame, timeoutMs: 60 * 60 * 1000 });
+  }
+  // Persist the embedder choice on the companion (used when it changes after first setup).
+  async setEmbedConfig() {
+    try { const ws = await this.ensureWs(); await ws.rpc("config", { embedSrc: this.settings.customEmbedSrc || undefined }); }
+    catch { /* companion offline; applied at next provision/connect */ }
   }
   isProvisioned(): boolean { return this.settings.provisioned; }
   async markProvisioned() { this.settings.provisioned = true; await this.saveSettings(); }
 
   // Browse candidate chat models (.gguf) in a folder, for the settings dropdown.
-  async listModels(dir: string): Promise<ModelsData> {
+  async listModels(dir: string, kind: "chat" | "embed" | "all" = "chat"): Promise<ModelsData> {
     const ws = await this.ensureWs();
-    const r = await ws.rpc<ModelsData>("models.scan", { dir }, { timeoutMs: 15000 });
+    const r = await ws.rpc<ModelsData>("models.scan", { dir, kind }, { timeoutMs: 15000 });
     return r.data ?? { dir, models: [] };
   }
   // Cheaply validate a chosen model source (exists + is a GGUF; URLs pass through).

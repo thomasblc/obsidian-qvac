@@ -19,6 +19,7 @@ export interface QvacSettings {
   // Optional: use your own chat model (a local GGUF path or a URL) instead of downloading the
   // default. Empty = use the built-in model picked above. Embeddings still download (small).
   customModelSrc: string;
+  customEmbedSrc: string; // optional user GGUF for embeddings (empty = default EmbeddingGemma)
   modelsFolder: string; // folder browsed for local .gguf models in settings
 }
 
@@ -31,7 +32,7 @@ export const CHAT_MODELS: { key: string; label: string }[] = [
 ];
 
 export const DEFAULT_SETTINGS: QvacSettings = {
-  settingsVersion: 5,
+  settingsVersion: 6,
   indexOnStartup: true,
   chatBaseKey: "4b",
   excludeFolders: "",
@@ -44,6 +45,7 @@ export const DEFAULT_SETTINGS: QvacSettings = {
   tabConnect: true,
   tabTrain: true,
   customModelSrc: "",
+  customEmbedSrc: "",
   modelsFolder: "~/.qvac/models",
 };
 
@@ -84,7 +86,10 @@ export class QvacSettingTab extends PluginSettingTab {
       });
 
     new Setting(containerEl).setName("Custom chat model").setHeading();
-    this.renderModelPicker(containerEl);
+    this.renderModelPicker(containerEl, { key: "customModelSrc", kind: "chat", showFolder: true });
+
+    new Setting(containerEl).setName("Custom embedding model").setHeading();
+    this.renderModelPicker(containerEl, { key: "customEmbedSrc", kind: "embed", showFolder: false });
 
     new Setting(containerEl)
       .setName("Index on startup")
@@ -128,26 +133,38 @@ export class QvacSettingTab extends PluginSettingTab {
       .addButton((b) => b.setButtonText("Color by folder").onClick(() => { void this.plugin.colorGraph(); }));
   }
 
-  // Folder + dropdown + live validation for the custom chat model (replaces a raw path field).
-  private renderModelPicker(containerEl: HTMLElement) {
+  // Folder + dropdown + live validation for a custom model (chat or embeddings). Replaces a raw path.
+  private renderModelPicker(containerEl: HTMLElement, opts: { key: "customModelSrc" | "customEmbedSrc"; kind: "chat" | "embed"; showFolder: boolean }) {
     const s = this.plugin.settings;
+    const { key, kind, showFolder } = opts;
+    const isEmbed = kind === "embed";
     const basename = (p: string) => p.split("/").pop() || p;
     let dropdown: DropdownComponent | null = null;
 
-    new Setting(containerEl)
-      .setName("Models folder")
-      .setDesc("Folder scanned for local .gguf chat models. Default is QVAC's own model store.")
-      .addText((t) => t.setValue(s.modelsFolder).onChange(async (v) => { s.modelsFolder = v.trim() || "~/.qvac/models"; await this.plugin.saveSettings(); }))
-      .addExtraButton((b) => b.setIcon("refresh-cw").setTooltip("Rescan folder").onClick(() => { void populate(); }));
+    const persist = async () => {
+      await this.plugin.saveSettings();
+      if (isEmbed) await this.plugin.setEmbedConfig();
+      this.plugin.refreshOpenViews();
+    };
+
+    if (showFolder) {
+      new Setting(containerEl)
+        .setName("Models folder")
+        .setDesc("Folder scanned for local .gguf models. Default is QVAC's own model store.")
+        .addText((t) => t.setValue(s.modelsFolder).onChange(async (v) => { s.modelsFolder = v.trim() || "~/.qvac/models"; await this.plugin.saveSettings(); }))
+        .addExtraButton((b) => b.setIcon("refresh-cw").setTooltip("Rescan folder").onClick(() => { void populate(); }));
+    }
 
     new Setting(containerEl)
-      .setName("Model")
-      .setDesc("Pick a local model, or keep Default to download the built-in one. The small embeddings model still downloads either way.")
+      .setName(isEmbed ? "Embedding model" : "Chat model (custom)")
+      .setDesc(isEmbed
+        ? "Pick a local embedding model, or keep Default (EmbeddingGemma). Changing this after indexing requires a full reindex, since existing vectors were made by the old model."
+        : "Pick a local model, or keep Default to download the built-in one. The small embeddings model still downloads either way.")
       .addDropdown((dd) => {
         dropdown = dd;
         dd.addOption("", "Default (download the built-in model)");
-        dd.setValue(s.customModelSrc);
-        dd.onChange(async (v) => { s.customModelSrc = v; await this.plugin.saveSettings(); this.plugin.refreshOpenViews(); void validate(); });
+        dd.setValue(s[key]);
+        dd.onChange(async (v) => { s[key] = v; await persist(); void validate(); });
       });
 
     const status = containerEl.createDiv({ cls: "qvac-status" });
@@ -155,15 +172,15 @@ export class QvacSettingTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName("Or paste a path / URL")
       .setDesc("Advanced: a .gguf outside the folder above, or a model URL. Overrides the dropdown.")
-      .addText((t) => t.setPlaceholder("/path/to/model.gguf or https://…").onChange(async (v) => { s.customModelSrc = v.trim(); await this.plugin.saveSettings(); this.plugin.refreshOpenViews(); void populate(); }));
+      .addText((t) => t.setPlaceholder("/path/to/model.gguf or https://…").onChange(async (v) => { s[key] = v.trim(); await persist(); void populate(); }));
 
     const validate = async () => {
       status.removeClass("is-connected"); status.removeClass("is-disconnected");
-      if (!s.customModelSrc) { status.setText("Using the built-in model (downloads on first setup)."); return; }
+      if (!s[key]) { status.setText(isEmbed ? "Using the default embedding model." : "Using the built-in model (downloads on first setup)."); return; }
       status.setText("Checking model…");
       try {
-        const r = await this.plugin.checkModel(s.customModelSrc);
-        if (r.ok) { status.setText(`Ready: ${basename(s.customModelSrc)}${r.sizeMB ? ` (${r.sizeMB} MB)` : ""}`); status.addClass("is-connected"); }
+        const r = await this.plugin.checkModel(s[key]);
+        if (r.ok) { status.setText(`Ready: ${basename(s[key])}${r.sizeMB ? ` (${r.sizeMB} MB)` : ""}`); status.addClass("is-connected"); }
         else { status.setText(`Cannot use this model: ${r.error ?? "invalid"}`); status.addClass("is-disconnected"); }
       } catch { status.setText("Start the companion to validate the model."); }
     };
@@ -173,13 +190,13 @@ export class QvacSettingTab extends PluginSettingTab {
       const d = dropdown;
       status.setText("Scanning folder…");
       let data: ModelsData;
-      try { data = await this.plugin.listModels(s.modelsFolder); }
+      try { data = await this.plugin.listModels(s.modelsFolder, kind); }
       catch { status.setText("Start the companion to browse models (or paste a path below)."); return; }
       d.selectEl.empty();
       d.addOption("", "Default (download the built-in model)");
       for (const m of data.models) d.addOption(m.path, `${m.name} (${m.sizeMB} MB)`);
-      if (s.customModelSrc && !data.models.some((m) => m.path === s.customModelSrc)) d.addOption(s.customModelSrc, `(custom) ${basename(s.customModelSrc)}`);
-      d.setValue(s.customModelSrc);
+      if (s[key] && !data.models.some((m) => m.path === s[key])) d.addOption(s[key], `(custom) ${basename(s[key])}`);
+      d.setValue(s[key]);
       if (data.error) { status.setText(`Folder not readable: ${data.error}`); status.addClass("is-disconnected"); return; }
       void validate();
     };

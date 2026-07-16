@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.14 - 2026-07 - Choose both models at setup
+
+- The first-run Setup panel now lets you choose the chat model AND the embedding model: download
+  the default, or pick an existing local .gguf (no download). Only the defaults you keep are fetched.
+- Custom embedding model supported end to end (companion persists the choice; changing it later
+  requires a reindex). Settings gained an "Embedding model" picker. Companion >= 0.2.14.
+
 ## 0.2.13 - 2026-07 - Respect the config dir
 
 - "Color graph by folder" writes to the vault's actual config dir (Vault#configDir) instead of a

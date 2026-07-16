@@ -117,6 +117,8 @@
 .qvac-offline-steps code { background: var(--background-modifier-border); padding: 2px 6px; border-radius: 4px; }
 
 .qvac-fullwidth { width: 100%; }
+.qvac-setup-row { margin: 12px 0; }
+.qvac-setup-label { font-size: 12px; color: var(--text-muted); margin-bottom: 4px; }
 .qvac-msg-actions { display: flex; gap: 6px; margin-top: 8px; }
 .qvac-linkall { margin-bottom: 10px; }
 

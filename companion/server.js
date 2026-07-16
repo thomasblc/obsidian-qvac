@@ -7,7 +7,7 @@
 import http from "node:http";
 import path from "node:path";
 import crypto from "node:crypto";
-import { unlinkSync, writeFileSync, readdirSync, statSync, openSync, readSync, closeSync } from "node:fs";
+import { unlinkSync, writeFileSync, readFileSync, readdirSync, statSync, openSync, readSync, closeSync } from "node:fs";
 import { tmpdir, homedir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { WebSocketServer } from "ws";
@@ -30,6 +30,16 @@ const CHAT_BASE = "4b";
 const GROUND_TOPK = 6, GROUND_CHARS = 700, HISTORY_TURNS = 8;
 
 const mm = new ModelManager({ ctxSize: 8192 });
+
+// Persist the optional custom embedder source across restarts (all embed calls read one central
+// slot, so setting it here applies everywhere consistently). Changing it means the caller reindexes.
+const EMBED_CFG = path.join(CONFIG_DIR, "embed.json");
+function loadEmbedSrc() {
+  try { const j = JSON.parse(readFileSync(EMBED_CFG, "utf8")); return (typeof j.embedSrc === "string" && j.embedSrc) ? j.embedSrc : null; }
+  catch { return null; }
+}
+function saveEmbedSrc(src) { try { writeFileSync(EMBED_CFG, JSON.stringify({ embedSrc: src || null }), { mode: 0o600 }); } catch { /* */ } }
+mm.setEmbedSrc(loadEmbedSrc());
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const trainer = new Trainer(path.join(CONFIG_DIR, "training"), path.join(__dirname, "finetune.js"));
 let training = false; // a LoRA run holds the global ~/.qvac worker; chat/embed are paused during it
@@ -38,6 +48,9 @@ const MODEL_OPS = new Set(["chat", "search", "embed-doc", "index", "complete", "
 // A user-configured custom chat model (GGUF path or URL) from the plugin settings, if any.
 function customModelSrc(msg) {
   return (typeof msg.modelSrc === "string" && msg.modelSrc.trim()) ? msg.modelSrc.trim() : null;
+}
+function customEmbedSrc(msg) {
+  return (typeof msg.embedSrc === "string" && msg.embedSrc.trim()) ? msg.embedSrc.trim() : null;
 }
 
 // ---- custom-model helpers (folder browse + cheap validation, no worker load) ----
@@ -143,11 +156,15 @@ const handlers = {
   // model store (~/.qvac/models). fs-only, no worker load. Non-chat assets are filtered out.
   "models.scan"(msg) {
     const dir = expandHome(msg.dir || "~/.qvac/models");
+    // kind "chat" (default) hides obvious non-chat assets; "embed"/"all" show every .gguf so the
+    // user can pick an embedding model (whose name often contains "embed").
+    const chatOnly = (msg.kind || "chat") === "chat";
     let entries = [];
     try { entries = readdirSync(dir); } catch (e) { return { dir, models: [], error: String(e?.message || e) }; }
     const models = [];
     for (const name of entries) {
-      if (!name.toLowerCase().endsWith(".gguf") || NON_CHAT.test(name)) continue;
+      if (!name.toLowerCase().endsWith(".gguf")) continue;
+      if (chatOnly && NON_CHAT.test(name)) continue;
       const abs = path.join(dir, name);
       let sizeMB = 0;
       try { sizeMB = Math.round(statSync(abs).size / (1024 * 1024)); } catch { continue; }
@@ -169,6 +186,15 @@ const handlers = {
     if (!st.isFile()) return { ok: false, error: "Not a file." };
     if (!isGgufFile(abs)) return { ok: false, error: "Not a GGUF file (missing GGUF header)." };
     return { ok: true, kind: "gguf", sizeMB: Math.round(st.size / (1024 * 1024)) };
+  },
+
+  // Persist the custom embedder choice (set from settings after first setup). Changing it requires
+  // a reindex, since existing vectors were produced by the previous embedder.
+  config(msg) {
+    const embedSrc = customEmbedSrc(msg);
+    mm.setEmbedSrc(embedSrc);
+    saveEmbedSrc(embedSrc);
+    return { ok: true, embedSrc };
   },
 
   async index(msg, push) {
@@ -337,9 +363,11 @@ const handlers = {
     // Cache the chat + embed models (lazily; later phases defer TTS/OCR/LoRA-base). With a custom
     // chat model (a local GGUF already on disk), skip the big chat download; only embeddings is needed.
     const modelSrc = customModelSrc(msg);
+    const embedSrc = customEmbedSrc(msg);
+    mm.setEmbedSrc(embedSrc); saveEmbedSrc(embedSrc); // custom embedder is a local GGUF already on disk
     if (!modelSrc) await mm.download(BASES[CHAT_BASE], "llm", (p) => push({ type: "provision.progress", model: "chat", percentage: p?.percentage ?? null }));
-    await mm.download(EMBEDDINGGEMMA_300M_Q4_0, "llamacpp-embedding", (p) => push({ type: "provision.progress", model: "embed", percentage: p?.percentage ?? null }));
-    return { provisioned: modelSrc ? ["embed"] : ["chat", "embed"] };
+    if (!embedSrc) await mm.download(EMBEDDINGGEMMA_300M_Q4_0, "llamacpp-embedding", (p) => push({ type: "provision.progress", model: "embed", percentage: p?.percentage ?? null }));
+    return { provisioned: [...(modelSrc ? [] : ["chat"]), ...(embedSrc ? [] : ["embed"])] };
   },
 };
 

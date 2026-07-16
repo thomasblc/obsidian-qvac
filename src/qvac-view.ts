@@ -169,19 +169,43 @@ export class QvacView extends ItemView {
 
   // ---------- SETUP (first-run provisioning) ----------
   private renderSetup() {
+    const s = this.plugin.settings;
     const wrap = this.bodyEl.createDiv({ cls: "qvac-setup" });
     wrap.createDiv({ cls: "qvac-train-title", text: "Set up QVAC" });
-    const custom = !!this.plugin.settings.customModelSrc;
-    wrap.createDiv({ cls: "qvac-train-desc", text: custom
-      ? "Using your custom chat model, so only the small embeddings model (~300 MB) downloads into ~/.qvac. This runs once and happens entirely on your machine - nothing leaves it."
-      : "Downloads the local AI models (~4.5 GB: a chat model + an embeddings model) into ~/.qvac. This runs once and happens entirely on your machine - nothing leaves it. Search and Connect work as soon as the small embeddings model lands." });
-    const btn = wrap.createEl("button", { cls: "qvac-btn-primary", text: custom ? "Download embeddings (~300 MB) & finish" : "Download & set up" });
+    wrap.createDiv({ cls: "qvac-train-desc", text: "Choose your models, then set up. Everything runs on your machine - nothing leaves it. Anything left on \"Download the default\" is fetched once into ~/.qvac; a local model you pick is used as-is (no download)." });
+
+    const fillSelect = async (sel: HTMLSelectElement, kind: "chat" | "embed", current: string, defLabel: string) => {
+      sel.empty();
+      const def = sel.createEl("option", { text: defLabel }); def.value = "";
+      try {
+        const data = await this.plugin.listModels(s.modelsFolder, kind);
+        for (const m of data.models) { const o = sel.createEl("option", { text: `${m.name} (${m.sizeMB} MB)` }); o.value = m.path; }
+        if (current && !data.models.some((m) => m.path === current)) { const o = sel.createEl("option", { text: `(custom) ${current.split("/").pop() ?? current}` }); o.value = current; }
+      } catch { /* connected here, but tolerate a scan miss */ }
+      sel.value = current;
+    };
+
+    const chatRow = wrap.createDiv({ cls: "qvac-setup-row" });
+    chatRow.createDiv({ cls: "qvac-setup-label", text: "Chat model" });
+    const chatSel = chatRow.createEl("select", { cls: "dropdown qvac-fullwidth" });
+    void fillSelect(chatSel, "chat", s.customModelSrc, "Download the default (Qwen3 4B, ~2.5 GB)");
+    chatSel.onchange = () => { s.customModelSrc = chatSel.value; };
+
+    const embedRow = wrap.createDiv({ cls: "qvac-setup-row" });
+    embedRow.createDiv({ cls: "qvac-setup-label", text: "Embedding model" });
+    const embedSel = embedRow.createEl("select", { cls: "dropdown qvac-fullwidth" });
+    void fillSelect(embedSel, "embed", s.customEmbedSrc, "Download the default (EmbeddingGemma, ~300 MB)");
+    embedSel.onchange = () => { s.customEmbedSrc = embedSel.value; };
+
+    const btn = wrap.createEl("button", { cls: "qvac-btn-primary", text: "Set up" });
     const status = wrap.createDiv({ cls: "qvac-train-status" });
     const barWrap = wrap.createDiv({ cls: "qvac-bar hidden" });
     const bar = barWrap.createDiv({ cls: "qvac-bar-fill" });
     btn.onclick = async () => {
-      btn.disabled = true; barWrap.removeClass("hidden"); status.setText("Starting download…");
+      btn.disabled = true; barWrap.removeClass("hidden"); status.setText("Preparing…");
       try {
+        await this.plugin.saveSettings();
+        await this.plugin.setEmbedConfig();
         const res = await this.plugin.provision((f: ProvisionFrame) => {
           if (f.type === "provision.progress") {
             const p = f.percentage;

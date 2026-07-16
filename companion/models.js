@@ -24,10 +24,11 @@ export const BASES = {
 };
 
 export class ModelManager {
-  constructor({ ctxSize = 4096 } = {}) {
+  constructor({ ctxSize = 4096, embedSrc = null } = {}) {
     this.ctxSize = ctxSize;
+    this.embedSrc = embedSrc || null; // optional user GGUF for embeddings; null => default EmbeddingGemma
     this.llm = null;   // { modelId, baseKey, lora, tools, remote }
-    this.emb = null;   // { modelId } (always local: the vault never leaves)
+    this.emb = null;   // { modelId, src } (always local: the vault never leaves)
     this.remote = null;    // { providerPublicKey } -> chat/agent completions run on a remote machine
     this.provider = null;  // this machine's provider public key when sharing its GPU
     this.ocrId = null;     // OCR recognizer slot (loaded on first /api/ocr; pulls a CRAFT detector too)
@@ -58,6 +59,7 @@ export class ModelManager {
     return {
       llm: this.llm ? { baseKey: this.llm.baseKey, lora: this.llm.lora || null } : null,
       embed: this.emb ? { loaded: true } : null,
+      embedSrc: this.embedSrc,
       remote: this.remote ? this.remote.providerPublicKey : null,
       provider: this.provider,
     };
@@ -173,12 +175,20 @@ export class ModelManager {
   }
 
   async _ensureEmbedUnlocked() {
-    if (this.emb) return this.emb.modelId;
-    const modelId = await loadModel({ modelSrc: EMBEDDINGGEMMA_300M_Q4_0, modelType: "llamacpp-embedding" });
-    this.emb = { modelId };
+    const src = this.embedSrc || EMBEDDINGGEMMA_300M_Q4_0;
+    if (this.emb && this.emb.src === src) return this.emb.modelId;
+    if (this.emb) { try { await unloadModel({ modelId: this.emb.modelId, clearStorage: false }); } catch { /* */ } this.emb = null; }
+    const modelId = await loadModel({ modelSrc: src, modelType: "llamacpp-embedding" });
+    this.emb = { modelId, src };
     return modelId;
   }
   async ensureEmbed() { return this._serialize(() => this._ensureEmbedUnlocked()); }
+  // Set the embedder source (a user GGUF, or null for the default). Forces a reload on next use.
+  // Changing this after indexing means the old vectors no longer match: the caller must reindex.
+  setEmbedSrc(src) {
+    const next = src || null;
+    if (next !== this.embedSrc) { this.embedSrc = next; this.emb = null; }
+  }
 
   // Fetch a model's weights into ~/.qvac/models (loadModel downloads, then we unload).
   // onProgress receives the SDK load/download progress ({ percentage }). Loads with a
