@@ -1,8 +1,8 @@
 # Local AI for your vault
 
-**Chat with your vault, fully local.** An Obsidian plugin that runs AI entirely on your machine: semantic search, cited answers, related-notes, inline writing commands, OCR over your images, and an optional model fine-tuned on your own notes. **Nothing leaves your computer.**
+**Chat with your vault, fully local.** An Obsidian plugin that runs AI entirely on your machine: semantic search, cited answers, missing-link suggestions, inline writing commands, OCR over your images, and an optional model fine-tuned on your own notes. **Nothing leaves your computer.**
 
-Obsidian has no built-in AI, and the existing AI plugins are cloud-first. The few local ones only do chat. This one ships the whole thing locally, and it is the only one that can **fine-tune a model on your vault** so the assistant learns your knowledge and your writing style.
+It runs entirely on your machine, and can even **fine-tune a small model on your vault** so the assistant learns your knowledge and your writing style. Your notes never become someone else's training data.
 
 A single panel with four tabs: **Chat . AI Search . Connect . Train**.
 
@@ -57,9 +57,9 @@ cd companion && npm install && node server.js                        # from a cl
 
 ## Commands
 
-- **Open QVAC chat** / **Open related notes** / **Train a voice on your vault**
-- **Index vault (incremental)** / **Reindex vault (full)**
-- **Summarize / Rewrite / Fix grammar / Expand** the current selection (also in the right-click menu)
+- **Open chat** / **Open semantic search** / **Open Connect (find missing links)** / **Train a model on your vault**
+- **Index vault (incremental)** / **Reindex vault (full)** / **Color graph by folder**
+- **Summarize selection** / **Rewrite selection (clearer)** / **Fix grammar in selection** / **Expand selection** (also in the editor right-click menu)
 
 ## Privacy
 
