@@ -4,7 +4,7 @@
 
 Obsidian has no built-in AI, and the existing AI plugins are cloud-first. The few local ones only do chat. This one ships the whole thing locally, and it is the only one that can **fine-tune a model on your vault** so the assistant learns your knowledge and your writing style.
 
-A single panel with four tabs: **Chat . Search . Related . Train**.
+A single panel with four tabs: **Chat . AI Search . Connect . Train**.
 
 ## Features
 
@@ -24,28 +24,35 @@ This plugin is a thin client. The AI runs in a separate **QVAC companion** proce
 **Disclosures (please read):**
 
 - **A local companion is required.** Install and run the QVAC companion; the plugin connects to it. Without it, the plugin shows a "companion not running" state and does nothing. See [Install the companion](#install-the-companion).
-- **Everything is local.** No vault content, no queries, and no telemetry are ever sent to any server. The only network use is the companion's **one-time model download** on first run (about 7 GB), fetched from the QVAC model registry.
+- **Everything is local.** No vault content, no queries, and no telemetry are ever sent to any server. The only network use is the companion's **one-time model download** on first run (about 4.5 GB: a chat model plus an embeddings model), fetched from the QVAC model registry. You can point it at models you already have to download less, or nothing.
 - **Files outside the vault.** The plugin reads a small auth token the companion writes at `~/.qvac-obsidian/` so it can connect securely to the local server. The companion stores its index and models under `~/.qvac-obsidian/` and `~/.qvac/`.
-- **Desktop only.** Requires Node/Electron APIs; it will not load on Obsidian mobile. macOS first; Windows/Linux companions are planned.
+- **Desktop only.** The plugin uses Node/Electron APIs, so it will not load on Obsidian mobile. The companion runs on any desktop OS with Node 20+ (macOS, Windows, Linux).
 - **No self-update.** The plugin never downloads or runs code on its own. You install and update the companion yourself.
 - **To stop it:** quit the QVAC companion. The plugin then simply reports it is offline.
 
 ## Install
 
-1. Install the plugin (Community plugins once approved, or [BRAT](https://github.com/TfTHacker/obsidian42-brat) for the beta: add `thomasblc/obsidian-qvac`).
+1. Install the plugin from **Community plugins** (search "Local AI for your vault"), or with [BRAT](https://github.com/TfTHacker/obsidian42-brat) for the latest beta: add `thomasblc/obsidian-qvac`.
 2. Install and run the **QVAC companion** (below).
-3. Open the QVAC panel (ribbon icon or the command palette: "Open QVAC chat"). The first question triggers the one-time model download.
+3. Open the QVAC panel (ribbon icon or the command palette: "Open chat"). The first time, a Setup panel downloads the models (or lets you pick local models you already have), all on your machine.
 
 ### Install the companion
 
-The companion is a small local daemon that runs [`@qvac/sdk`](https://www.npmjs.com/package/@qvac/sdk) (Apache-2.0), the local AI engine from Tether's QVAC. One daemon serves all your vaults. It lives in [`companion/`](companion/).
+The companion is a small local daemon that runs [`@qvac/sdk`](https://www.npmjs.com/package/@qvac/sdk) (Apache-2.0), the local AI engine from Tether's QVAC. One daemon serves all your vaults. Its source is in [`companion/`](companion/).
 
-**macOS (packaged app):** download `QVAC-Companion.dmg` from the [Releases](https://github.com/thomasblc/obsidian-qvac/releases), drag it to Applications, and launch it once. It writes its connection token to `~/.qvac-obsidian/` and the plugin connects automatically.
-
-**From source (any platform with Node 20+):**
+**Run it (any desktop OS with Node 20+):**
 
 ```bash
-cd companion && npm install && node server.js
+npx qvac-obsidian-companion
+```
+
+That starts the daemon and writes its connection token to `~/.qvac-obsidian/`; the plugin connects automatically. Leave it running while you use Obsidian; quit it (Ctrl+C) to go offline.
+
+Prefer a global install, or running from source:
+
+```bash
+npm install -g qvac-obsidian-companion && qvac-obsidian-companion   # global
+cd companion && npm install && node server.js                        # from a clone of this repo
 ```
 
 ## Commands
