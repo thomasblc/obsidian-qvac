@@ -32,7 +32,7 @@ This plugin is a thin client. The AI runs in a separate **QVAC companion** proce
 
 ## Install
 
-1. Install the plugin from **Community plugins** (search "Local AI for your vault"), or with [BRAT](https://github.com/TfTHacker/obsidian42-brat) for the latest beta: add `thomasblc/obsidian-qvac`.
+1. Install the plugin from **Community plugins** in Obsidian (search "Local AI for your vault").
 2. Install and run the **QVAC companion** (below).
 3. Open the QVAC panel (ribbon icon or the command palette: "Open chat"). The first time, a Setup panel downloads the models (or lets you pick local models you already have), all on your machine.
 
