@@ -8,7 +8,7 @@
   "homepage": "https://github.com/thomasblc/obsidian-qvac",
   "repository": {
     "type": "git",
-    "url": "https://github.com/thomasblc/obsidian-qvac.git",
+    "url": "git+https://github.com/thomasblc/obsidian-qvac.git",
     "directory": "companion"
   },
   "keywords": [
