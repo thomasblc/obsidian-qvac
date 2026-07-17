@@ -56,11 +56,16 @@ function customEmbedSrc(msg) {
 // "|emb2" = the prompt-prefixed embedding scheme; bumping it invalidates pre-prefix indexes so they
 // are rebuilt (old unprefixed vectors are not comparable to new prefixed query embeddings).
 function currentEmbedTag() { return (mm.embedSrc || "default") + "|emb2"; }
-// Refuse to query an index built by a different embedder (same-dim models would return silently
-// wrong results). The dimension mismatch is separately guarded inside ContextIndex.search.
-function assertEmbedMatch(idx) {
-  if (idx.records.length && idx.embedTag && idx.embedTag !== currentEmbedTag())
-    throw new Error("The embedding model changed since this vault was indexed. Run 'Reindex vault (full)' in QVAC.");
+// Vectors built by a different embedder/scheme (an index from a pre-prefix companion whose tag is
+// empty, or one from after the embed model was swapped) cannot be compared to the current embedder's
+// query vectors: they return silently-wrong hits. Drop them. index-manifest then reports empty and
+// the plugin re-pushes every note, rebuilding cleanly under the current scheme, so this self-heals on
+// the next startup sync with no manual reindex. NOTE: the truthy `idx.embedTag &&` check is
+// deliberately absent - an empty tag on a NON-empty index means "legacy, pre-tag" and must be dropped;
+// an empty tag on an empty index is caught by the records-length check. Returns true if it dropped one.
+function healStaleIndex(idx) {
+  if (idx.records.length && idx.embedTag !== currentEmbedTag()) { idx.reset(); return true; }
+  return false;
 }
 
 // ---- custom-model helpers (folder browse + cheap validation, no worker load) ----
@@ -114,8 +119,8 @@ function getIndex(vaultId) {
 // ---- chat grounding (cited from the retrieval layer, never the model) ----
 async function buildGrounding(vaultId, message) {
   const idx = getIndex(vaultId);
+  healStaleIndex(idx);
   if (!idx.records.length) return { grounding: "", hits: [] };
-  assertEmbedMatch(idx);
   const qv = (await mm.embedMany([message], { mode: "query" }))[0];
   const hits = idx.search(qv, { topK: GROUND_TOPK, minScore: 0.3 })
     .map((h) => ({ source: h.source, sourceType: h.sourceType, score: Number(h.score.toFixed(4)), content: String(h.text).slice(0, GROUND_CHARS) }));
@@ -228,17 +233,19 @@ const handlers = {
     const { vaultId, vaultPath } = msg;
     if (!vaultPath) throw new Error("index requires vaultPath");
     const idx = getIndex(vaultId);
+    healStaleIndex(idx); // never mix a prior scheme's vectors into a fresh full build
     const onProgress = (done, total, phase) => push({ type: "index.progress", done, total, phase: phase || "embedding" });
     await idx.addFolderSource({ rootPath: vaultPath, type: "vault", exts: [".md", ".markdown", ".txt"] },
       (texts, opts) => mm.embedMany(texts, { ...opts, mode: "document" }), onProgress);
+    idx.stampEmbed(currentEmbedTag()); // record the embedder identity so a later swap is detectable
     return idx.stats();
   },
 
   async search(msg) {
     const { vaultId, query, topK = 8 } = msg;
     const idx = getIndex(vaultId);
+    healStaleIndex(idx);
     if (!idx.records.length) return { hits: [] };
-    assertEmbedMatch(idx);
     const qv = (await mm.embedMany([String(query || "")], { mode: "query" }))[0];
     // Filter weak matches so a no-real-hit query returns few/none rather than noise. Tuned for the
     // prompt-prefixed embeddings (verified: a relevant hit ~0.36, an irrelevant one ~0.23), so 0.3
@@ -252,9 +259,9 @@ const handlers = {
     const { vaultId, path: docPath, text, mtime, sourceType } = msg;
     if (!docPath) throw new Error("embed-doc requires path");
     const idx = getIndex(vaultId);
-    // Embedder changed since this index was built: drop the old vectors so we never mix two models
-    // (a full reindex then repopulates cleanly with the new one).
-    if (idx.records.length && idx.embedTag && idx.embedTag !== currentEmbedTag()) idx.reset();
+    // Embedder/scheme changed since this index was built: drop the old vectors so we never mix two
+    // models (the plugin's diff then re-pushes every note, repopulating cleanly with the current one).
+    healStaleIndex(idx);
     const r = await idx.upsertDoc(docPath, text, mtime, (texts, opts) => mm.embedMany(texts, { ...opts, mode: "document" }), sourceType || "vault");
     if (idx.embedTag !== currentEmbedTag()) idx.stampEmbed(currentEmbedTag());
     return r;
@@ -265,7 +272,12 @@ const handlers = {
     return getIndex(vaultId).dropDoc(docPath);
   },
   async "index-manifest"(msg) {
-    return { manifest: getIndex(msg.vaultId).manifest() };
+    const idx = getIndex(msg.vaultId);
+    // The plugin calls this FIRST on every sync. If the stored vectors are from a stale scheme, drop
+    // them here so the returned (now-empty) manifest makes the plugin treat every note as new and
+    // re-push it: the vault self-heals on the next startup sync, no manual "Reindex vault (full)".
+    healStaleIndex(idx);
+    return { manifest: idx.manifest() };
   },
 
   // Inline commands (summarize/rewrite/fix/expand): a plain LLM completion, no RAG. Streams.
@@ -283,8 +295,8 @@ const handlers = {
   async related(msg) {
     const { vaultId, text, excludePath, topK = 5 } = msg;
     const idx = getIndex(vaultId);
+    healStaleIndex(idx);
     if (!idx.records.length || !String(text || "").trim()) return { hits: [] };
-    assertEmbedMatch(idx);
     const qv = (await mm.embedMany([String(text).slice(0, 2000)], { mode: "query" }))[0];
     const seen = new Set();
     const hits = [];
@@ -305,7 +317,7 @@ const handlers = {
     const { vaultId, existingPairs = [], minScore = 0.35, maxCandidates = 20, judge = true } = msg;
     const modelSrc = customModelSrc(msg);
     const idx = getIndex(vaultId);
-    assertEmbedMatch(idx);
+    healStaleIndex(idx);
     let notes = noteVectors(idx);
     // bound the O(N^2) pairwise scan so a huge (or hostile synced) vault can't wedge the worker
     const MAX_NOTES = 2000;
