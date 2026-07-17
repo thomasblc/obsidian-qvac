@@ -1,8 +1,13 @@
 name: Release
 
-# Build the plugin in CI and publish a GitHub release whose assets carry a build-provenance
-# attestation (so users can cryptographically verify main.js/styles.css were built from source).
-# Trigger: push a tag equal to the manifest version, e.g. `git tag 0.2.3 && git push origin 0.2.3`.
+# Build the plugin in CI and publish a GitHub release with the three plugin assets.
+# Trigger: push a tag equal to the manifest version, e.g. `git tag 0.2.23 && git push origin 0.2.23`.
+#
+# NOTE: build-provenance attestation was removed. It is only a "Recommendation" in Obsidian's review,
+# and its verifier intermittently rejected valid attestations (a missing attestation is a non-blocking
+# Recommendation, a failing one is a blocking Error). `gh attestation verify` confirmed our attestations
+# were cryptographically valid, so this is an Obsidian-side flake, not a build issue. Can be re-added if
+# that verifier stabilizes.
 
 on:
   push:
@@ -10,9 +15,7 @@ on:
       - "*.*.*"
 
 permissions:
-  contents: write        # create the release
-  id-token: write        # OIDC token for attestation
-  attestations: write    # write the provenance attestation
+  contents: write # create the release
 
 jobs:
   release:
@@ -29,14 +32,6 @@ jobs:
 
       - run: npm run build
 
-      - name: Attest build provenance for the release assets
-        uses: actions/attest-build-provenance@v2
-        with:
-          subject-path: |
-            main.js
-            manifest.json
-            styles.css
-
       - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -44,4 +39,4 @@ jobs:
           gh release create "${GITHUB_REF_NAME}" \
             main.js manifest.json styles.css \
             --title "${GITHUB_REF_NAME}" \
-            --notes "Automated release. Assets carry a GitHub build-provenance attestation."
+            --notes "Automated release."

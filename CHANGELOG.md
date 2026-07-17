@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.23 - 2026-07 - Drop flaky release attestation
+
+- Removed build-provenance attestation from CI releases. It is only a Recommendation, and Obsidian's
+  reviewer intermittently rejected valid attestations (turning a non-blocking Recommendation into a
+  blocking Error). gh attestation verify confirmed ours were valid, so this is an upstream flake.
+
 ## 0.2.22 - 2026-07 - Neutral update banner
 
 - The outdated-companion banner is now a neutral "a newer companion is available, update for the
