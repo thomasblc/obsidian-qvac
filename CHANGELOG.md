@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.19 - 2026-07 - Search quality (EmbeddingGemma prompts)
+
+- **Fixes irrelevant search results.** EmbeddingGemma is a prompt-conditioned model: queries and
+  documents must be embedded with different task prefixes. The companion now applies them
+  ("task: search result | query:" vs "title: none | text:"), which is what makes semantic search,
+  Connect, and chat grounding actually relevant. Requires a one-time full reindex (done
+  automatically on the affected index; run "Reindex vault (full)" if needed). Companion >= 0.2.19.
+
 ## 0.2.18 - 2026-07 - Bound the model scan
 
 - The model-folder scan is capped (entries + results) so pointing it at a huge tree cannot freeze

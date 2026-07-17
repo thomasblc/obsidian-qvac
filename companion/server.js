@@ -52,7 +52,9 @@ function customModelSrc(msg) {
 function customEmbedSrc(msg) {
   return (typeof msg.embedSrc === "string" && msg.embedSrc.trim()) ? msg.embedSrc.trim() : null;
 }
-function currentEmbedTag() { return mm.embedSrc || "default"; }
+// "|emb2" = the prompt-prefixed embedding scheme; bumping it invalidates pre-prefix indexes so they
+// are rebuilt (old unprefixed vectors are not comparable to new prefixed query embeddings).
+function currentEmbedTag() { return (mm.embedSrc || "default") + "|emb2"; }
 // Refuse to query an index built by a different embedder (same-dim models would return silently
 // wrong results). The dimension mismatch is separately guarded inside ContextIndex.search.
 function assertEmbedMatch(idx) {
@@ -113,7 +115,7 @@ async function buildGrounding(vaultId, message) {
   const idx = getIndex(vaultId);
   if (!idx.records.length) return { grounding: "", hits: [] };
   assertEmbedMatch(idx);
-  const qv = (await mm.embedMany([message]))[0];
+  const qv = (await mm.embedMany([message], { mode: "query" }))[0];
   const hits = idx.search(qv, { topK: GROUND_TOPK, minScore: 0.3 })
     .map((h) => ({ source: h.source, sourceType: h.sourceType, score: Number(h.score.toFixed(4)), content: String(h.text).slice(0, GROUND_CHARS) }));
   if (!hits.length) return { grounding: "", hits: [] };
@@ -227,7 +229,7 @@ const handlers = {
     const idx = getIndex(vaultId);
     const onProgress = (done, total, phase) => push({ type: "index.progress", done, total, phase: phase || "embedding" });
     await idx.addFolderSource({ rootPath: vaultPath, type: "vault", exts: [".md", ".markdown", ".txt"] },
-      (texts, opts) => mm.embedMany(texts, opts), onProgress);
+      (texts, opts) => mm.embedMany(texts, { ...opts, mode: "document" }), onProgress);
     return idx.stats();
   },
 
@@ -236,7 +238,7 @@ const handlers = {
     const idx = getIndex(vaultId);
     if (!idx.records.length) return { hits: [] };
     assertEmbedMatch(idx);
-    const qv = (await mm.embedMany([String(query || "")]))[0];
+    const qv = (await mm.embedMany([String(query || "")], { mode: "query" }))[0];
     // Filter weak matches so a query with no real hit (e.g. "urgent tasks" in a vault that has none)
     // returns few/none rather than a wall of ~35% noise.
     const hits = idx.search(qv, { topK, minScore: 0.4 }).map((h) => ({ source: h.source, sourceType: h.sourceType, score: Number(h.score.toFixed(4)), content: h.text }));
@@ -251,7 +253,7 @@ const handlers = {
     // Embedder changed since this index was built: drop the old vectors so we never mix two models
     // (a full reindex then repopulates cleanly with the new one).
     if (idx.records.length && idx.embedTag && idx.embedTag !== currentEmbedTag()) idx.reset();
-    const r = await idx.upsertDoc(docPath, text, mtime, (texts, opts) => mm.embedMany(texts, opts), sourceType || "vault");
+    const r = await idx.upsertDoc(docPath, text, mtime, (texts, opts) => mm.embedMany(texts, { ...opts, mode: "document" }), sourceType || "vault");
     if (idx.embedTag !== currentEmbedTag()) idx.stampEmbed(currentEmbedTag());
     return r;
   },
@@ -281,7 +283,7 @@ const handlers = {
     const idx = getIndex(vaultId);
     if (!idx.records.length || !String(text || "").trim()) return { hits: [] };
     assertEmbedMatch(idx);
-    const qv = (await mm.embedMany([String(text).slice(0, 2000)]))[0];
+    const qv = (await mm.embedMany([String(text).slice(0, 2000)], { mode: "query" }))[0];
     const seen = new Set();
     const hits = [];
     for (const h of idx.search(qv, { topK: topK + 8, minScore: 0.25 })) {

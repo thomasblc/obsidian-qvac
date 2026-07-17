@@ -203,7 +203,14 @@ export class ModelManager {
   }
 
   // Embed many texts; batches to keep each RPC small. Returns number[][] aligned to input.
-  async embedMany(texts, { batch = 16, onProgress } = {}) {
+  // mode "query" | "document" apply EmbeddingGemma's task prompts (it is a prompt-conditioned model:
+  // queries and documents must be embedded with different prefixes or retrieval returns noise). Only
+  // for the default embedder; a user's custom GGUF gets raw text (its own prompting is its business).
+  async embedMany(texts, { batch = 16, onProgress, mode = "raw" } = {}) {
+    const prefix = this.embedSrc ? ""
+      : mode === "query" ? "task: search result | query: "
+      : mode === "document" ? "title: none | text: "
+      : "";
     return this._serialize(async () => {
       this._assertNotPaused(); // training holds the worker lock; a load here would collide
       // Retry once: if the embedder id went stale (the worker restarted out from under us),
@@ -214,7 +221,7 @@ export class ModelManager {
           const out = [];
           for (let i = 0; i < texts.length; i += batch) {
             const slice = texts.slice(i, i + batch);
-            const res = await embed({ modelId, text: slice });
+            const res = await embed({ modelId, text: prefix ? slice.map((t) => prefix + t) : slice });
             const vecs = Array.isArray(res.embedding[0]) ? res.embedding : [res.embedding];
             for (const v of vecs) out.push(v);
             if (onProgress) onProgress(Math.min(i + batch, texts.length), texts.length);
