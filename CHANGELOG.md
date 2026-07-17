@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.20 - 2026-07 - Search threshold for prefixed embeddings
+
+- Lowered the AI Search score threshold to 0.3 to match the prompt-prefixed embeddings from 0.2.19
+  (verified: a relevant hit scores ~0.36, noise ~0.23). At the old 0.4 a relevant result could be
+  filtered out. Verified end to end against EmbeddingGemma.
+
 ## 0.2.19 - 2026-07 - Search quality (EmbeddingGemma prompts)
 
 - **Fixes irrelevant search results.** EmbeddingGemma is a prompt-conditioned model: queries and
