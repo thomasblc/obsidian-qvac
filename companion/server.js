@@ -82,12 +82,14 @@ function isGgufFile(absPath) {
 // Recursively collect .gguf models under a folder (large models can live in sets/ or sharded/
 // subfolders, and be split into -00001-of-000NN parts). We recurse a few levels, keep only the
 // first shard of a split set (the rest load as siblings), and optionally hide non-chat assets.
-function collectGguf(dir, chatOnly, depth, acc) {
+function collectGguf(dir, chatOnly, depth, acc, budget = { entries: 20000 }) {
+  if (acc.length >= 300 || budget.entries <= 0) return acc; // bound work if pointed at a huge tree
   let entries;
   try { entries = readdirSync(dir, { withFileTypes: true }); } catch { return acc; }
   for (const e of entries) {
+    if (--budget.entries <= 0 || acc.length >= 300) break;
     const abs = path.join(dir, e.name);
-    if (e.isDirectory()) { if (depth < 4) collectGguf(abs, chatOnly, depth + 1, acc); continue; }
+    if (e.isDirectory()) { if (depth < 4) collectGguf(abs, chatOnly, depth + 1, acc, budget); continue; }
     if (!e.name.toLowerCase().endsWith(".gguf")) continue;
     if (chatOnly && NON_CHAT.test(e.name)) continue;
     const shard = /-(\d{5})-of-(\d{5})\.gguf$/i.exec(e.name);

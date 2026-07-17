@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.18 - 2026-07 - Bound the model scan
+
+- The model-folder scan is capped (entries + results) so pointing it at a huge tree cannot freeze
+  the companion.
+
 ## 0.2.17 - 2026-07 - Bigger models + indexing feedback
 
 - Model picker now finds models in subfolders and split (sharded) model sets, so large models
