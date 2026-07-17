@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.25 - 2026-07 - Version-stamp styles.css too
+
+- styles.css is now version-stamped like main.js, so both release assets have a unique hash and
+  neither inherits a prior build's (flaky) attestation. The review shows a non-blocking
+  "missing attestation" Recommendation instead of an Error.
+
 ## 0.2.24 - 2026-07 - Version-stamped build
 
 - The build stamps the version into main.js so each release has a distinct hash. Combined with

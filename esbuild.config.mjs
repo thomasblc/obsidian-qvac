@@ -1,6 +1,6 @@
 import esbuild from "esbuild";
 import process from "process";
-import { readFileSync } from "fs";
+import { readFileSync, writeFileSync } from "fs";
 import { builtinModules } from "module";
 
 const prod = process.argv[2] === "production";
@@ -28,5 +28,14 @@ const ctx = await esbuild.context({
   outfile: "main.js",
 });
 
-if (prod) { await ctx.rebuild(); await ctx.dispose(); }
-else { await ctx.watch(); }
+if (prod) {
+  await ctx.rebuild();
+  await ctx.dispose();
+  // Version-stamp styles.css too (it is a static asset, otherwise byte-identical across releases,
+  // so its release hash would collide and inherit a prior build's attestation). Idempotent.
+  const banner = `/* QVAC Local AI v${version} */`;
+  const css = readFileSync("styles.css", "utf8").replace(/^\/\* QVAC Local AI v[^\n]*\*\/\n?/, "");
+  writeFileSync("styles.css", `${banner}\n${css}`);
+} else {
+  await ctx.watch();
+}
