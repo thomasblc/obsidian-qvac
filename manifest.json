@@ -1,7 +1,7 @@
 {
 	"id": "qvac-local-ai",
 	"name": "Local AI for your vault",
-	"version": "0.2.27",
+	"version": "0.2.28",
 	"minAppVersion": "1.7.2",
 	"description": "Chat with your vault, fully local. Semantic search and cited answers via a local QVAC companion. Nothing leaves your machine.",
 	"author": "QVAC",

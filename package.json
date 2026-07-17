@@ -1,6 +1,6 @@
 {
   "name": "qvac-local-ai",
-  "version": "0.2.27",
+  "version": "0.2.28",
   "private": true,
   "description": "QVAC for Obsidian - local AI plugin",
   "type": "module",
