@@ -1,5 +1,6 @@
 import { ItemView, WorkspaceLeaf, MarkdownRenderer, Notice, debounce, setIcon } from "obsidian";
 import type QvacPlugin from "./main";
+import { MIN_COMPANION_VERSION, versionGte } from "./main";
 import { CreateNoteModal } from "./create-note-modal";
 import type { Hit, Adapter, ChatMessage, Candidate, Health, ChatFrame, ProvisionFrame, ScanFrame, TrainFrame } from "./lib/rpc";
 
@@ -22,6 +23,7 @@ export class QvacView extends ItemView {
   private statusText: HTMLElement;
   private connected = false;
   private statusChecked = false; // has the first health check resolved yet
+  private companionOutdated = false; // connected, but older than MIN_COMPANION_VERSION
 
   // chat
   private history: ChatMessage[] = [];
@@ -122,14 +124,16 @@ export class QvacView extends ItemView {
     let h: Health | null = null;
     try { h = await this.plugin.checkHealth(); } catch { h = null; }
     const on = !!h;
-    const changed = on !== this.connected;
+    const outdated = !!h && !versionGte(h.version, MIN_COMPANION_VERSION);
+    const changed = on !== this.connected || outdated !== this.companionOutdated;
     const firstCheck = !this.statusChecked;
     this.connected = on;
+    this.companionOutdated = outdated;
     this.statusChecked = true;
     this.statusDot?.toggleClass("on", on);
     this.statusDot?.toggleClass("off", !on);
-    if (this.statusText) this.statusText.setText(h ? `connected · ${h.version}` : "companion offline");
-    if (changed || firstCheck) this.renderBody(); // "checking" -> offline card <-> real tab
+    if (this.statusText) this.statusText.setText(h ? `connected · ${h.version}${outdated ? " (update)" : ""}` : "companion offline");
+    if (changed || firstCheck) this.renderBody(); // "checking" -> offline / outdated / real tab
   }
 
   setTab(tab: QvacTab) {
@@ -148,6 +152,8 @@ export class QvacView extends ItemView {
     if (!this.statusChecked) { this.bodyEl.createDiv({ cls: "qvac-empty", text: "Connecting to companion…" }); return; }
     // Nothing works without the companion; guide the user instead of failing on the first click.
     if (!this.connected) { this.renderOffline(); return; }
+    // Connected but too old: warn (non-blocking) that features may misbehave until it is updated.
+    if (this.companionOutdated) this.renderOutdatedBanner();
     // Until the models are downloaded, every tab shows the one-time Setup panel (no silent multi-GB
     // download inside a chat/index timeout).
     if (!this.plugin.isProvisioned()) { this.renderSetup(); return; }
@@ -168,6 +174,16 @@ export class QvacView extends ItemView {
     li.createEl("code", { text: "npx qvac-obsidian-companion" });
     steps.createEl("li").setText("Leave it running, then click Recheck below.");
     wrap.createEl("button", { cls: "qvac-btn-primary", text: "Recheck" }).onclick = () => { void this.refreshStatus(); };
+  }
+
+  // Non-blocking banner shown when the companion is older than this plugin needs.
+  private renderOutdatedBanner() {
+    const b = this.bodyEl.createDiv({ cls: "qvac-outdated" });
+    b.createSpan({ text: `Companion is out of date (need ${MIN_COMPANION_VERSION}+). Search may return poor results until you update it: ` });
+    b.createEl("code", { text: "npx qvac-obsidian-companion@latest" });
+    b.createSpan({ text: ", then restart it and " });
+    b.createEl("a", { text: "recheck", href: "#" }).onclick = (e) => { e.preventDefault(); void this.refreshStatus(); };
+    b.createSpan({ text: "." });
   }
 
   // ---------- SETUP (first-run provisioning) ----------

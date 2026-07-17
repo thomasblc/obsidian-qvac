@@ -112,6 +112,10 @@
 .qvac-status.is-connected { color: var(--text-success); }
 .qvac-status.is-disconnected { color: var(--text-warning); }
 
+/* outdated-companion banner */
+.qvac-outdated { margin-bottom: 10px; padding: 8px 10px; border: 1px solid var(--text-warning); border-radius: 6px; font-size: 12px; line-height: 1.5; color: var(--text-normal); }
+.qvac-outdated code { background: var(--background-modifier-border); padding: 1px 5px; border-radius: 4px; }
+
 /* offline card */
 .qvac-offline-steps { margin: 12px 0 16px; padding-left: 20px; font-size: 13px; line-height: 1.7; color: var(--text-normal); }
 .qvac-offline-steps code { background: var(--background-modifier-border); padding: 2px 6px; border-radius: 4px; }

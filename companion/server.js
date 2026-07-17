@@ -19,7 +19,7 @@ import { Vault } from "./vault.js";
 import { buildRecords, buildCausalDataset } from "./select.js";
 import { CONFIG_DIR, vaultDir, ensureToken, writeDaemonFile, removeDaemonFile, safeVaultId } from "./config.js";
 
-const VERSION = "0.0.1-0a";
+let VERSION = "0.0.0"; // real version read from package.json below (once __dirname is known)
 const PORT = Number(process.env.PORT || 8849);
 const HOST = "127.0.0.1";
 const TOKEN = process.env.QVAC_OBSIDIAN_TOKEN || ensureToken();
@@ -41,6 +41,7 @@ function loadEmbedSrc() {
 function saveEmbedSrc(src) { try { writeFileSync(EMBED_CFG, JSON.stringify({ embedSrc: src || null }), { mode: 0o600 }); } catch { /* */ } }
 mm.setEmbedSrc(loadEmbedSrc());
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+try { VERSION = JSON.parse(readFileSync(path.join(__dirname, "package.json"), "utf8")).version || VERSION; } catch { /* keep fallback */ }
 const trainer = new Trainer(path.join(CONFIG_DIR, "training"), path.join(__dirname, "finetune.js"));
 let training = false; // a LoRA run holds the global ~/.qvac worker; chat/embed are paused during it
 const MODEL_OPS = new Set(["chat", "search", "embed-doc", "index", "complete", "related", "provision", "connect.scan"]);

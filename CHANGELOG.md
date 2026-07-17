@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.21 - 2026-07 - Companion version check
+
+- The companion now reports its real version, and the panel warns (non-blocking banner + "(update)"
+  in the header) when the companion is older than the plugin needs, with the update command.
+
 ## 0.2.20 - 2026-07 - Search threshold for prefixed embeddings
 
 - Lowered the AI Search score threshold to 0.3 to match the prompt-prefixed embeddings from 0.2.19

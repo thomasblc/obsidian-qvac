@@ -27,6 +27,16 @@ function errMsg(e: unknown): string {
   try { return JSON.stringify(e); } catch { return "unknown error"; }
 }
 
+// The oldest companion this plugin works well with. Bump when a release needs companion changes
+// (e.g. the prompt-prefixed embeddings landed in 0.2.19). The panel warns if the companion is older.
+export const MIN_COMPANION_VERSION = "0.2.19";
+export function versionGte(a: string, b: string): boolean {
+  const parse = (v: string) => String(v).split(/[.\-+]/).slice(0, 3).map((n) => parseInt(n, 10) || 0);
+  const x = parse(a), y = parse(b);
+  for (let i = 0; i < 3; i++) { if ((x[i] || 0) > (y[i] || 0)) return true; if ((x[i] || 0) < (y[i] || 0)) return false; }
+  return true;
+}
+
 export default class QvacPlugin extends Plugin {
   settings: QvacSettings = DEFAULT_SETTINGS;
   ws: WsClient | null = null;
