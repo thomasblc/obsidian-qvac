@@ -1,13 +1,14 @@
 name: Release
 
 # Build the plugin in CI and publish a GitHub release with the three plugin assets.
-# Trigger: push a tag equal to the manifest version, e.g. `git tag 0.2.23 && git push origin 0.2.23`.
+# Trigger: push a tag equal to the manifest version, e.g. `git tag -a 0.2.27 -m 0.2.27 && git push origin 0.2.27`.
 #
-# NOTE: build-provenance attestation was removed. It is only a "Recommendation" in Obsidian's review,
-# and its verifier intermittently rejected valid attestations (a missing attestation is a non-blocking
-# Recommendation, a failing one is a blocking Error). `gh attestation verify` confirmed our attestations
-# were cryptographically valid, so this is an Obsidian-side flake, not a build issue. Can be re-added if
-# that verifier stabilizes.
+# Build-provenance attestation clears Obsidian's "Missing artifact attestations" recommendation.
+# It was briefly removed (0.2.23) because Obsidian's verifier rejected valid attestations, but that was
+# a digest-collision artifact: byte-identical assets across releases shared a digest, so a release
+# inherited a prior build's attestation. Since 0.2.24 every asset is version-stamped (esbuild.config.mjs
+# banners main.js AND styles.css), so each release has a UNIQUE digest with exactly one attestation and
+# nothing stale to inherit. Attestation is re-enabled here.
 
 on:
   push:
@@ -16,6 +17,8 @@ on:
 
 permissions:
   contents: write # create the release
+  id-token: write # mint the provenance signing token
+  attestations: write # record the attestation
 
 jobs:
   release:
@@ -31,6 +34,14 @@ jobs:
       - run: npm ci
 
       - run: npm run build
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            main.js
+            manifest.json
+            styles.css
 
       - name: Publish release
         env:
