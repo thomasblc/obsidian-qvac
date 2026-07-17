@@ -204,8 +204,8 @@ export class QvacView extends ItemView {
       sel.value = current;
     };
 
-    const chatSel = document.createElement("select");
-    const embedSel = document.createElement("select");
+    const chatSel = createEl("select");
+    const embedSel = createEl("select");
     const refill = () => {
       void fillSelect(chatSel, "chat", s.customModelSrc, "Download the default (Qwen3 4B, ~2.5 GB)");
       void fillSelect(embedSel, "embed", s.customEmbedSrc, "Download the default (EmbeddingGemma, ~300 MB)");
