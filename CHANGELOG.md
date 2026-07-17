@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.17 - 2026-07 - Bigger models + indexing feedback
+
+- Model picker now finds models in subfolders and split (sharded) model sets, so large models
+  (e.g. a sharded 35B) show up instead of only top-level single-file .gguf.
+- Indexing shows a percentage and a "loading the model" note on the first (slow) run; AI Search
+  says "indexing in progress" instead of a bare "no matches" while the index is still building.
+
 ## 0.2.16 - 2026-07 - Setup folder, chat formatting, connect + search tuning
 
 - Setup panel: pick the models FOLDER too (not everyone keeps models in ~/.qvac/models).

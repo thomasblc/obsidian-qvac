@@ -355,7 +355,7 @@ export class QvacView extends ItemView {
       try {
         const hits = await this.plugin.search(q);
         results.empty();
-        if (!hits.length) { results.createDiv({ cls: "qvac-empty", text: "No matches." }); return; }
+        if (!hits.length) { results.createDiv({ cls: "qvac-empty", text: this.plugin.isIndexing() ? "Indexing your vault… search will work once it finishes." : "No matches." }); return; }
         for (const h of hits) {
           const card = results.createDiv({ cls: "qvac-result" });
           const top = card.createDiv({ cls: "qvac-result-top" });

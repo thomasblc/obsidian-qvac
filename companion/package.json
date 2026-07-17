@@ -1,6 +1,6 @@
 {
   "name": "qvac-obsidian-companion",
-  "version": "0.2.16",
+  "version": "0.2.17",
   "description": "QVAC for Obsidian companion daemon: local chat + RAG + OCR + LoRA over an Obsidian vault, via @qvac/sdk. Nothing leaves the machine.",
   "type": "module",
   "license": "MIT",

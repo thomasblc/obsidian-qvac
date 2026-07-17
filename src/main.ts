@@ -254,12 +254,14 @@ export default class QvacPlugin extends Plugin {
     return out;
   }
 
+  isIndexing(): boolean { return this.indexing; }
+
   async indexVault(full: boolean) {
     if (this.indexing) { new Notice("QVAC: already indexing"); return; }
     let ws: WsClient;
     try { ws = await this.ensureWs(); } catch (e) { new Notice(errMsg(e)); return; }
     this.indexing = true;
-    const notice = new Notice("QVAC: indexing…", 0);
+    const notice = new Notice("QVAC: indexing… loading the model (the first run can take a minute)", 0);
     try {
       const local = this.localManifest();
       // Always fetch the remote manifest (even for "full") so deleted notes are dropped. The manifest
@@ -276,7 +278,8 @@ export default class QvacPlugin extends Plugin {
         if (!(f instanceof TFile)) continue;
         const text = await this.app.vault.cachedRead(f);
         await ws.rpc("embed-doc", { vaultId: this.vaultId, path: p, text, mtime: f.stat.mtime }, { timeoutMs: 60000 });
-        notice.setMessage(`QVAC: indexing ${++done}/${toUpsert.length}`);
+        done++;
+        notice.setMessage(`QVAC: indexing ${done}/${toUpsert.length} (${Math.round((done / toUpsert.length) * 100)}%)`);
       }
       for (const p of toDrop) await ws.rpc("drop-doc", { vaultId: this.vaultId, path: p });
       // Multimodal (opt-in): OCR the text inside images into the index, incrementally. Managed

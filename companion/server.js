@@ -79,6 +79,25 @@ function isGgufFile(absPath) {
   } catch { return false; }
   finally { if (fd !== undefined) { try { closeSync(fd); } catch { /* */ } } }
 }
+// Recursively collect .gguf models under a folder (large models can live in sets/ or sharded/
+// subfolders, and be split into -00001-of-000NN parts). We recurse a few levels, keep only the
+// first shard of a split set (the rest load as siblings), and optionally hide non-chat assets.
+function collectGguf(dir, chatOnly, depth, acc) {
+  let entries;
+  try { entries = readdirSync(dir, { withFileTypes: true }); } catch { return acc; }
+  for (const e of entries) {
+    const abs = path.join(dir, e.name);
+    if (e.isDirectory()) { if (depth < 4) collectGguf(abs, chatOnly, depth + 1, acc); continue; }
+    if (!e.name.toLowerCase().endsWith(".gguf")) continue;
+    if (chatOnly && NON_CHAT.test(e.name)) continue;
+    const shard = /-(\d{5})-of-(\d{5})\.gguf$/i.exec(e.name);
+    if (shard && shard[1] !== "00001") continue; // represent a split set by its first part only
+    let sizeMB = 0;
+    try { sizeMB = Math.round(statSync(abs).size / (1024 * 1024)); } catch { continue; }
+    acc.push({ name: e.name, path: abs, sizeMB });
+  }
+  return acc;
+}
 
 const indexes = new Map(); // vaultId -> ContextIndex
 function getIndex(vaultId) {
@@ -167,17 +186,8 @@ const handlers = {
     // kind "chat" (default) hides obvious non-chat assets; "embed"/"all" show every .gguf so the
     // user can pick an embedding model (whose name often contains "embed").
     const chatOnly = (msg.kind || "chat") === "chat";
-    let entries = [];
-    try { entries = readdirSync(dir); } catch (e) { return { dir, models: [], error: String(e?.message || e) }; }
-    const models = [];
-    for (const name of entries) {
-      if (!name.toLowerCase().endsWith(".gguf")) continue;
-      if (chatOnly && NON_CHAT.test(name)) continue;
-      const abs = path.join(dir, name);
-      let sizeMB = 0;
-      try { sizeMB = Math.round(statSync(abs).size / (1024 * 1024)); } catch { continue; }
-      models.push({ name, path: abs, sizeMB });
-    }
+    try { statSync(dir); } catch (e) { return { dir, models: [], error: String(e?.message || e) }; }
+    const models = collectGguf(dir, chatOnly, 0, []);
     models.sort((a, b) => a.name.localeCompare(b.name));
     return { dir, models };
   },
