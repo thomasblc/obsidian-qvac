@@ -176,10 +176,10 @@ export class QvacView extends ItemView {
     wrap.createEl("button", { cls: "qvac-btn-primary", text: "Recheck" }).onclick = () => { void this.refreshStatus(); };
   }
 
-  // Non-blocking banner shown when the companion is older than this plugin needs.
+  // Non-blocking banner shown when the companion is older than this plugin recommends.
   private renderOutdatedBanner() {
     const b = this.bodyEl.createDiv({ cls: "qvac-outdated" });
-    b.createSpan({ text: `Companion is out of date (need ${MIN_COMPANION_VERSION}+). Search may return poor results until you update it: ` });
+    b.createSpan({ text: "A newer QVAC companion is available. Update for the latest fixes and features: " });
     b.createEl("code", { text: "npx qvac-obsidian-companion@latest" });
     b.createSpan({ text: ", then restart it and " });
     b.createEl("a", { text: "recheck", href: "#" }).onclick = (e) => { e.preventDefault(); void this.refreshStatus(); };

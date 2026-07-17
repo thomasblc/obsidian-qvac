@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.22 - 2026-07 - Neutral update banner
+
+- The outdated-companion banner is now a neutral "a newer companion is available, update for the
+  latest fixes and features" instead of calling out one specific symptom.
+
 ## 0.2.21 - 2026-07 - Companion version check
 
 - The companion now reports its real version, and the panel warns (non-blocking banner + "(update)"
