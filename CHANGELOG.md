@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.24 - 2026-07 - Version-stamped build
+
+- The build stamps the version into main.js so each release has a distinct hash. Combined with
+  dropping the attestation (0.2.23), releases no longer inherit a prior build's (flaky) attestation;
+  a missing attestation is a non-blocking Recommendation.
+
 ## 0.2.23 - 2026-07 - Drop flaky release attestation
 
 - Removed build-provenance attestation from CI releases. It is only a Recommendation, and Obsidian's
